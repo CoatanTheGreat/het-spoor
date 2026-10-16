@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="nl" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Het Spoor</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- v0.12.0: paper-and-ink view with start screen, archive folders, a generated town map and a clock. Load order matters: content, library, engine, views, ui. -->
+<div id="rotate" aria-hidden="true"><p><b>Draai je iPad</b>Het Spoor speel je liggend. Draai je scherm een kwartslag om verder te spelen.</p></div>
+<div id="app" hidden></div>
+<div id="modal" hidden><div class="mbox"><div class="mhead"><b id="mTitle"></b><button id="mClose">Sluiten</button></div><div id="mBody"></div></div></div>
+<div id="toast" hidden></div>
+<script defer src="content.js"></script>
+<script defer src="lib.js"></script>
+<script defer src="engine.js"></script>
+<script defer src="views.js"></script>
+<script defer src="ui.js"></script>
+</body>
+</html>
