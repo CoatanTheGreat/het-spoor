@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.15.0)
+# Het Spoor, overdracht (stand v0.16.0)
 
-Dit document hoort bij `het-spoor` (`v0.15.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
+Dit document hoort bij `het-spoor` (`v0.16.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
@@ -19,11 +19,11 @@ Dit document hoort bij `het-spoor` (`v0.15.0`). Het beschrijft wat er gebouwd is
 |---|---|
 | content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen |
 | lib.js | Plot-DNA, naamgeving, wereld en cast |
-| engine.js | Zaakopbouw, regels, acties, bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), solver en tests |
-| views.js | Silhouetten, responsief zaakbord, verdachtenoverzicht, kaartgenerator, tableau, verhoor en coach |
-| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), bevestigingen, schermen, invoer, modals en debugpaneel |
+| engine.js | Zaakopbouw, regels, acties (o.a. `Act.confrontWrong`), bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), solver en tests |
+| views.js | Inktlijn-/houtsnede-portretten (`Silhouette`), responsief zaakbord, verdachtenoverzicht, kaartgenerator (`MapGen`), diepere tableau-scènes (`Tableau`), verhoor en coach |
+| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), "Aha!"-feedback (`#aha`), uitgebreide 0 KB WebAudio `SFX`, bevestigingen, schermen, invoer, modals en debugpaneel |
 
-Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.15.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen`, `player.seenJournal` en `play.knownSched` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `play.knownSched`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
+Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.16.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen`, `player.seenJournal` en `play.knownSched` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `play.knownSched`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
 
 ## Wat er per fase gebouwd is
 
@@ -193,17 +193,40 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.15.0 
 - **Scherpere eerste 60 seconden (`UI.introHtml`):**
   - Duidelijke hoofdknop (`Begin direct in [logies] (08:00)`) en korte oriëntatietip over voorwerpen, aanwezigen en klikbare namen/plaatsen.
 
-## Meetwaarden (stand v0.15.0)
+### Fase F, v0.16.0: houtsnede-portretten, diepere Tableau-scènes, rustigere kaart-badges & "Aha!"-feedback
+- **Gestileerde inktlijn-/houtsnede-portretten (`Silhouette` in `views.js`, 0 KB SVG):**
+  - Gevormd perkamentkleurig gezicht met inktcontour, rechterwang-arcering, deterministische kaak-/neus-/wenkbrauw-/leeftijdsdetails en kledingrevers/knoop-arcering, uitsluitend op basis van publieke velden (`name`, `gender`, `role`, `age`, `kenmerk`) en naamvolgorde — 100% lekvrij.
+  - Vier duidelijk herkenbare expressies per stemming (`warm`, `neutral`, `cold`, `hostile`) in `<g class="sil-expr" data-tone="...">`, doorgevoerd op alle portretplekken (zaakbord 68 px / 40 px, verdachtenmatrix 38 px, detailpaneel 96 px, tableau, verhoor 176 px, spiekkaart 64 px, dagboek 44 px, archief 40 px en debug-figurengalerij).
+  - Het zichtbare `kenmerk` (bril, sjaal, speld, tas, map, wandelstok) blijft scherp leesbaar op 40 px, 72 px en full, met verfijnde brillijndikte op volle-lengte-schaal zodat ogen en expressie zichtbaar blijven.
+- **Diepere Tableau-scènes (`Tableau` in `views.js`):**
+  - Scène-eigen SVG `<defs>` met lucht-, muur-, vloer-, zonlicht- en gloeigradienten per dagdeel (`ochtend`, `middag`, `avond`) en tijdvak (`oud`, `klassiek`, `modern`, `toekomst`).
+  - Rijkere binnenarchitectuur (steenverband/behang/panelen/bulkheads, lambrisering met kassetten, perspectiefvloeren, plafondbalken, locatie-eigen sfeerdetails zoals klok op dagdeelstand, schoorsteenmantel, kaarten/lijsten, vloerkleed, gereedschapsrek en archiefnissen) + diagonaal ochtend-/middagzonlicht door ramen en warme lamp-/haardgloed in de avond.
+  - Rijkere buitenscènes (tweelaagse atmosferische skyline per tijdvak, verlichte avondramen en straatlantaarns, haven-waterreflecties/meerpalen, parklanen/hekwerk, poortkantelen/valhek) en zachte grondschaduwen onder voorwerpen en figuren — met behoud van `viewBox="0 0 960 540"` en alle hotspot-grenzen.
+- **Rustigere stadskaart-badges (`MapGen.unknownBadges` & `MapGen.svg` in `views.js`):**
+  - Onbekenden zijn teruggebracht naar hooguit één compacte gestippelde badge per locatie (`?`, `2 ?`, `3 ?` of `3+ ?`; nooit `?\d` en geen `? ? ? 3+`-rij meer).
+  - Bekende kernpersonen worden begrensd op maximaal 3 initialencirkels + optionele `+N`-chip; reeds ontmoete bijfiguren staan rustig in het detailpaneel in plaats van de kaartpinnen te vullen.
+- **Voelbare "Aha!"-momenten, in-character reactie bij fout bewijs & uitgebreide 0 KB WebAudio SFX (`content.js`, `engine.js`, `ui.js`, `index.html`, `style.css`):**
+  - `#aha`-doorbraakstrook (met respect voor `prefers-reduced-motion` en `role="status"`/`aria-live="polite"`) + subtiele Zaakbord-tabpuls en verhoor-kaderflits bij nieuw spoor, gebroken alibi, bevestigd alibi (met respect voor *Moeilijk*), doorgeprikte verklaring, roostertip en gesloten zaak.
+  - `Act.confrontWrong` + tijdloze `confront.wrong.{warm,neutral,cold,hostile}`-tekstbanken geven bij een fout bewijsstuk tijdens een confrontatie een directe, in-character reactie in het verhoortranscript (met eigen spreekstijl, 0 minuten klokkoste, hooguit één milde relatie-tik per stuk per gesprek en 100% lekvrij).
+  - `SFX` uitgebreid met 0 KB WebAudio-geluiden voor `thread(kind)`, `stamp()`, `folder()`, `steps()`, `aha(kind)`, `miss()` en `solved()` (naast `paper`, `pin`, `type`, `bell`, `seal`).
 
-- **68 tests, alle groen in Node** (65 bestaand — met `Mentions.linkHtml` en `Hints.get` toegevoegd aan de dader-lektest — + 3 nieuwe regressietests voor `Mentions.linkHtml`, ontdekte roostertips `knownSched` en 3-traps `Hints.get` over 30 seeds).
-- **54/54 headless Chromium-rookchecks groen** (0 console-/runtime-fouten): alle 37 v0.14.0-checks plus 17 nieuwe Fase E-checks (roostertips in detailpaneel, klikbare mentions in Dagboek en verhoortranscript, `#peek` boven `#modal`, `Escape`-prioriteit met focusherstel, 3-traps *Geef een zetje*, en bevestigingsdialogen bij *Dag afsluiten* en *Aanklacht indienen*).
+## Meetwaarden (stand v0.16.0)
+
+- **72 tests, alle groen in Node** (68 bestaand — met uitgebreide dader-lektest voor 4-stemmingenportretten en geüpdatete kaart-badge-test — + 4 nieuwe Fase F-regressietests voor houtsnede-portretten op 40 px/72 px/full, diepere Tableau-scènes per dagdeel × tijdvak, rustige kaart-badgedichtheid over 30 seeds en lekvrije in-character `Act.confrontWrong`).
+- **20/20 headless Chromium Fase F UI-rookchecks groen** (0 console-/runtime-fouten): alle 4 portretstemmingen en kenmerken op Zaakbord, Verdachtenmatrix, Detailpaneel, Verhoor en Figurengalerij; Tableau ochtend/avond-lichtval, `960×540` hotspot-grenzen en in-place hotspot-patching; rustige kaart-badges (`<= 5` per locatie, `<= 1` onbekenden-badge); alle 12 `SFX`-methoden foutloos; `#aha`-feedback bij nieuw spoor, gebroken alibi en doorgeprikte verklaring; in-character reactie bij fout bewijs zonder toast of tijdverlies; geen horizontale overloop in donkere modus op desktop (`1280×820`), staande iPad (`768×1024`) en 200% zoom (`640×420`).
 - Roadmap-status:
   - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
   - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
   - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar (commit `aaf3ab6`)
-  - **Fase E (`v0.15.0`)**: klaar
-  - **Volgende stap — Fase F (`v0.16.0`)**: gestileerde inktlijn-/houtsnede-portretten (0 KB SVG) met expressie per stemming (lekvrij), diepere Tableau-scènes, rustigere stadskaart-badges, voelbare "Aha!"-momenten + in-character reactie bij fout bewijs + uitgebreide 0 KB WebAudio SFX.
-  - **Daarna**: Fase G (interactief Spoorboek, extra twists `dubbel` & `slachtofferliegt`, relatie-effecten, klokbalans met niet-alwetende simulatiespeler) → Fase H (PWA: manifest/icoon/SW, save-migratieketen, geautomatiseerde Playwright/a11y-teststraat).
+  - **Fase E (`v0.15.0`)**: klaar (commit `aeb6ecf`)
+  - **Fase F (`v0.16.0`)**: klaar
+  - **Volgende stap — Fase G (`v0.17.0`)**: interactief Spoorboek (tijdlijn), extra Plot-DNA-twists (`dubbel`, `slachtofferliegt`), relatie-effecten en klokbalans met niet-alwetende simulatiespeler.
+  - **Daarna — Fase H (`v0.18.0`)**: PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat.
+
+## Meetwaarden (stand v0.15.0)
+
+- **68 tests, alle groen in Node** (65 bestaand — met `Mentions.linkHtml` en `Hints.get` toegevoegd aan de dader-lektest — + 3 nieuwe regressietests voor `Mentions.linkHtml`, ontdekte roostertips `knownSched` en 3-traps `Hints.get` over 30 seeds).
+- **54/54 headless Chromium-rookchecks groen** (0 console-/runtime-fouten): alle 37 v0.14.0-checks plus 17 nieuwe Fase E-checks (roostertips in detailpaneel, klikbare mentions in Dagboek en verhoortranscript, `#peek` boven `#modal`, `Escape`-prioriteit met focusherstel, 3-traps *Geef een zetje*, en bevestigingsdialogen bij *Dag afsluiten* en *Aanklacht indienen*).
 
 ## Meetwaarden (stand v0.14.0)
 
@@ -245,9 +268,8 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.15.0 
 ## Wat nog openstaat
 
 ### Afstemming
-- De tijdsdruk is lichter geworden. Speel een paar zaken na en stel zo nodig `COST` of de lengte van de dag bij. Een vaste simulatiespeler die niet alwetend is, staat gepland in Fase G.
+- De tijdsdruk is lichter geworden. Een vaste simulatiespeler die niet alwetend is, en eventuele bijstelling van `COST` of daglengte, staan gepland in Fase G.
 
 ### Nog op te pakken in vervolgfasen
-- "3+" op de stadskaart en drukke locatie-badges worden rustiger gemaakt in Fase F (`MapGen.unknownBadges`).
-- Een foute bewijskaart in de confrontatie geeft nu alleen een toast-melding (in-character reactie in Fase F).
-- De twists `dubbel` en `slachtofferliegt` uit de plot-DNA krijgen hun spelmechaniek in Fase G.
+- Interactief Spoorboek (tijdlijn), extra Plot-DNA-twists (`dubbel` en `slachtofferliegt`), relatie-effecten en klokbalans met niet-alwetende simulatiespeler (Fase G).
+- PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat (Fase H).

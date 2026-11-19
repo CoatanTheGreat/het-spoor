@@ -15,15 +15,28 @@ const STYLE_REPORT = {
   noir:        { badge: 'Dossier · Onderste Steen', intro: 'Voorbij de rookgordijnen en verhulde belangen tekent zich het werkelijke spoor af.' },
   omgekeerd:   { badge: 'Slotbewijs · De Misrekening', intro: 'Het schijnbaar waterdichte verhaal vertoont één fatale scheur zodra de stukken naast elkaar liggen.' }
 };
-/* ---------------- SFX: Procedurele WebAudio ("Paper, Ink & Clock" - 0 KB externe assets) ---------------- */
+/* ---------------- SFX: Procedurele WebAudio ("Paper, Ink & Clock" - 0 KB externe assets, v0.16.0) ---------------- */
 const SFX = {
   ctx: null, muted: false,
   _c() {
     if (this.muted || typeof window === 'undefined') return null;
-    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
-    if (!this.ctx) this.ctx = new AC();
-    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
-    return this.ctx;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return null;
+      if (!this.ctx) this.ctx = new AC();
+      if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      return this.ctx;
+    } catch (e) { return null; }
+  },
+  _note(c, freq, start, dur, gain, type, endFreq) {
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, start);
+    if (endFreq) o.frequency.exponentialRampToValueAtTime(endFreq, start + dur);
+    g.gain.setValueAtTime(0.0008, start);
+    g.gain.linearRampToValueAtTime(gain, start + Math.min(0.015, dur * 0.2));
+    g.gain.exponentialRampToValueAtTime(0.0008, start + dur);
+    o.connect(g); g.connect(c.destination);
+    o.start(start); o.stop(start + dur + 0.02);
   },
   paper() {
     const c = this._c(); if (!c) return;
@@ -36,10 +49,41 @@ const SFX = {
   },
   pin() {
     const c = this._c(); if (!c) return;
-    const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
-    o.type = 'triangle'; o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(140, t + 0.045);
-    g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.045);
-    o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.05);
+    const t = c.currentTime;
+    this._note(c, 520, t, 0.045, 0.075, 'triangle', 140);
+  },
+  thread(kind) {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime, f = kind === 'bevestigd' ? 587 : kind === 'vermoeden' ? 349 : 440;
+    this._note(c, f, t, 0.09, 0.05, 'triangle', f * 0.96);
+    this._note(c, f * 1.5, t + 0.015, 0.07, 0.022, 'sine');
+  },
+  stamp() {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime;
+    this._note(c, 185, t, 0.075, 0.095, 'triangle', 64);
+    this.paper();
+  },
+  folder() {
+    const c = this._c(); if (!c) return;
+    const dur = 0.11, buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.sin((i / d.length) * Math.PI) * (i < d.length * 0.45 ? 0.7 : 1);
+    const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+    flt.type = 'bandpass'; flt.frequency.setValueAtTime(850, c.currentTime); flt.frequency.linearRampToValueAtTime(1600, c.currentTime + dur);
+    flt.Q.value = 1.4; g.gain.value = 0.055;
+    src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(c.destination); src.start();
+  },
+  steps() {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime;
+    [0, 0.11, 0.22].forEach((dt, idx) => {
+      const dur = 0.045, buf = c.createBuffer(1, Math.floor(c.sampleRate * dur), c.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (d.length * 0.35));
+      const src = c.createBufferSource(), flt = c.createBiquadFilter(), g = c.createGain();
+      flt.type = 'lowpass'; flt.frequency.value = idx % 2 ? 420 : 520;
+      g.gain.value = 0.06;
+      src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(c.destination); src.start(t + dt);
+    });
   },
   type(fam) {
     const c = this._c(); if (!c) return;
@@ -68,10 +112,41 @@ const SFX = {
   },
   seal() {
     const c = this._c(); if (!c) return;
-    const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.14);
-    g.gain.setValueAtTime(0.14, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
-    o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.16);
+    const t = c.currentTime;
+    this._note(c, 150, t, 0.14, 0.13, 'sine', 48);
+  },
+  aha(kind) {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime;
+    if (kind === 'confront') {
+      this._note(c, 146.8, t, 0.18, 0.09, 'sine', 73.4);
+      this._note(c, 293.7, t + 0.04, 0.42, 0.055, 'triangle');
+      this._note(c, 440.0, t + 0.10, 0.48, 0.055, 'sine');
+      this._note(c, 587.3, t + 0.16, 0.56, 0.045, 'sine');
+    } else if (kind === 'alibi') {
+      this._note(c, 349.2, t, 0.18, 0.055, 'triangle');
+      this._note(c, 523.3, t + 0.11, 0.36, 0.06, 'sine');
+    } else if (kind === 'clear') {
+      this._note(c, 329.6, t, 0.22, 0.045, 'sine');
+      this._note(c, 415.3, t + 0.09, 0.32, 0.048, 'sine');
+    } else if (kind === 'tip') {
+      this._note(c, 698.5, t, 0.2, 0.036, 'sine');
+    } else {
+      // 'clue': crisp ascending ink chime
+      this._note(c, 523.3, t, 0.16, 0.048, 'triangle');
+      this._note(c, 659.3, t + 0.08, 0.3, 0.05, 'sine');
+    }
+  },
+  miss() {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime;
+    this._note(c, 210, t, 0.09, 0.065, 'triangle', 155);
+    this._note(c, 155, t + 0.09, 0.12, 0.055, 'sine', 120);
+  },
+  solved() {
+    const c = this._c(); if (!c) return;
+    const t = c.currentTime;
+    [293.7, 370.0, 440.0, 587.3].forEach((f, i) => this._note(c, f, t + i * 0.1, 0.62, 0.055, i === 0 ? 'triangle' : 'sine'));
   }
 };
 const UI = {
@@ -138,18 +213,114 @@ const UI = {
       text: e.text
     };
   },
+  // v0.16.0: capture public discovery counters before an action to detect palpable "Aha!" moments (zero state mutation, 100% leak-free)
+  snapState(s) {
+    if (!s || !s.play) return null;
+    const p = s.play, ac = p.alibiCheck || {};
+    const broken = {}; Object.keys(ac).forEach((k) => { if (ac[k] && ac[k].ok === false) broken[k] = true; });
+    const schedN = Object.values(p.knownSched || {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0);
+    return {
+      found: Object.assign({}, p.found || {}),
+      resolved: Object.assign({}, p.resolved || {}),
+      cleared: Object.assign({}, p.cleared || {}),
+      broken: broken,
+      schedN: schedN,
+      ended: !!p.ended,
+      wrongAcc: p.wrongAccusations || 0
+    };
+  },
+  aha(kind, title, sub, opts) {
+    let el = $('#aha');
+    if (!el && typeof document !== 'undefined' && document.body) {
+      el = document.createElement('div'); el.id = 'aha'; el.className = 'aha';
+      el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite'); el.setAttribute('aria-atomic', 'true');
+      document.body.appendChild(el);
+    }
+    if (!el) return;
+    const icons = {
+      confront: '<svg viewBox="0 0 20 20" width="18" height="18"><path d="M10 2 L12.4 7.2 L18 7.8 L13.8 11.6 L15 17.2 L10 14.3 L5 17.2 L6.2 11.6 L2 7.8 L7.6 7.2 Z" fill="currentColor"/></svg>',
+      'alibi-break': '<svg viewBox="0 0 20 20" width="18" height="18"><path d="M10 2 L18 17 L2 17 Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M10 7.5 L10 12.2 M10 14.4 L10 15.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+      'alibi-ok': '<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6.4 10.2 L9 12.8 L13.8 7.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      clue: '<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="8.8" cy="8.8" r="5.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M13 13 L17.5 17.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+      tip: '<svg viewBox="0 0 20 20" width="18" height="18"><circle cx="10" cy="10" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 5.5 L10 10 L13.5 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+    };
+    const toastEl = $('#toast');
+    if (toastEl && !toastEl.hidden) { clearTimeout(this.toastT); toastEl.hidden = true; }
+    el.innerHTML = `<span class="aha-ic" aria-hidden="true">${icons[kind] || icons.clue}</span><span class="aha-txt"><b>${U.esc(title)}</b>${sub ? `<span>${U.esc(sub)}</span>` : ''}</span>`;
+    el.className = 'aha aha-' + kind + ' show';
+    el.hidden = false;
+    clearTimeout(this.ahaT);
+    this.ahaT = setTimeout(() => { el.classList.remove('show'); el.hidden = true; }, (opts && opts.ms) || 3800);
+    if (!this.reduced()) {
+      if (opts && opts.pulseBoard && this.tab !== 'board') {
+        const bt = $('#app [data-ui="tab"][data-v="board"]');
+        if (bt) { bt.classList.remove('pulse-new'); void bt.offsetWidth; bt.classList.add('pulse-new'); }
+      }
+      if (opts && opts.flashIv) {
+        const fr = $('#app .iv-frame');
+        if (fr) { fr.classList.remove('aha-flash'); void fr.offsetWidth; fr.classList.add('aha-flash'); }
+      }
+    }
+  },
+  checkAha(before, s) {
+    if (!before || !s || !s.play) return;
+    const p = s.play, lv = Level.get(s);
+    if (!before.ended && p.ended) {
+      SFX.solved();
+      return this.aha('confront', 'Zaak gesloten!', 'Je eindverslag staat klaar.', { ms: 4400 });
+    }
+    if ((p.wrongAccusations || 0) > before.wrongAcc) {
+      SFX.miss();
+      return;
+    }
+    const newRes = Object.keys(p.resolved || {}).filter((id) => p.resolved[id] && !before.resolved[id]);
+    if (newRes.length) {
+      const c = s.contradictions.find((x) => x.id === newRes[0]), who = c && World.npc(s, c.npcId);
+      if (c && c.kind === 'culprit') {
+        SFX.aha('confront');
+        return this.aha('confront', 'Verklaring doorgeprikt!', (who ? U.first(who) + ' valt door de mand — ' : '') + 'nieuw spoor op het zaakbord.', { pulseBoard: true, flashIv: true });
+      }
+      SFX.aha('clear');
+      return this.aha('alibi-ok', 'Verklaring opgehelderd', (who ? U.first(who) + ' valt af als verdachte.' : 'Het misverstand is uit de wereld.'), { pulseBoard: true, flashIv: true });
+    }
+    const ac = p.alibiCheck || {};
+    const newBroken = Object.keys(ac).filter((id) => ac[id] && ac[id].ok === false && !before.broken[id]);
+    if (newBroken.length) {
+      const who = World.npc(s, newBroken[0]);
+      SFX.aha('alibi');
+      return this.aha('alibi-break', 'Alibi gebroken!', (who ? 'Het alibi van ' + U.first(who) + ' klopt niet — ' : '') + 'spoor toegevoegd aan het zaakbord.', { pulseBoard: true, flashIv: true });
+    }
+    const newCleared = Object.keys(p.cleared || {}).filter((id) => p.cleared[id] && !before.cleared[id]);
+    if (newCleared.length && lv.checkLabel) {
+      const who = World.npc(s, newCleared[0]);
+      SFX.aha('clear');
+      return this.aha('alibi-ok', 'Alibi bevestigd', (who ? U.first(who) + ' valt af als verdachte.' : 'Alibi bevestigd.'));
+    }
+    const newFound = Object.keys(p.found || {}).filter((id) => p.found[id] && !before.found[id]).map((id) => Evidence.get(s, id)).filter((e) => e && e.route !== 'start');
+    if (newFound.length) {
+      SFX.aha('clue');
+      return this.aha('clue', 'Nieuw spoor gevonden', newFound[0].title + ' ligt nu op het zaakbord.', { pulseBoard: true });
+    }
+    const schedN = Object.values(p.knownSched || {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0);
+    if (schedN > before.schedN) {
+      SFX.aha('tip');
+      return this.aha('tip', 'Roostertip genoteerd', 'Toegevoegd aan de persoonskaart op het zaakbord.');
+    }
+  },
   // run an action; its fresh log lines become the feed
   run(fn) {
     const s = this.s; if (!s) return;
-    const prev = s.play.logN || 0, r = fn(s);
+    const snap = this.snapState(s), prev = s.play.logN || 0, r = fn(s);
     const fresh = s.log.filter((e) => e.i && e.i > prev);
     if (fresh.length) this.feed = fresh.map((e) => this.line(s, e));
-    this.after(); return r;
+    this.after();
+    this.checkAha(snap, s);
+    return r;
   },
   // run an action inside an interrogation; tracks relation deltas and triggers line-by-line pacing (display only)
   runConv(fn) {
     const s = this.s; if (!s) return;
-    const npcId = s.visit && s.visit.conv;
+    const snap = this.snapState(s), npcId = s.visit && s.visit.conv;
     const before = npcId && s.relations[npcId] ? Object.assign({}, s.relations[npcId]) : null;
     const prev = s.play.logN || 0, r = fn(s);
     const fresh = s.log.filter((e) => e.i && e.i > prev);
@@ -163,6 +334,7 @@ const UI = {
       });
     }
     this.after();
+    this.checkAha(snap, s);
     const npc = curId && World.npc(s, curId);
     if (npc && s.visit && s.visit.conv) this.animateTranscript(npc);
     return r;
@@ -700,7 +872,7 @@ const UI = {
         inner += `<b>${U.esc(label)}</b><p class="sp-note">Je weet nog niet wie dit is.</p>` + (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('greet') ? `<button type="button" class="sp-act live" data-ui="greet" data-v="${x.id}">Aanspreken${mins('greet')}</button>` : outBtn);
       } else if (core) {
         const tone = Rels.toneOf(s, x.id);
-        inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}</span></div></div>` +
+        inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}</span></div></div>` +
           (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('talk') ? `<button type="button" class="sp-act live" data-ui="talk" data-v="${x.id}">Verhoren${mins('talk')}</button>` : outBtn);
       } else {
         inner += `<b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role)}, niet betrokken bij de zaak</span>` +
@@ -753,6 +925,7 @@ const UI = {
     if (T.late) return this.toast('Je komt pas om ' + U.hm(T.at) + ' aan in ' + loc.name + '. Dat is te laat voor vandaag.');
     if (!T.open) return this.toast(loc.name + ' is dicht in de ' + PARTS[T.part] + (T.part !== s.clock.part ? ', als je er om ' + U.hm(T.at) + ' aankomt' : '') + '.');
     if (this.tab === 'board' && Act.see(s)) Store.put('auto', Save.pack(s));
+    if (T.walk > 0) SFX.steps(); else SFX.paper();
     this.sel = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.tab = 'visit';
     this.run((st) => Act.visit(st, locId));
   },
@@ -766,7 +939,8 @@ const UI = {
     if (d.mention) { SFX.pin(); return this.peek(d.mention); }
     if (d.card && this.link) {   // v0.11.0 / v0.14.0: pulling threads with optional meaning
       if (d.card === this.link) { SFX.paper(); this.sel = this.link; this.link = null; return this.render(true); }
-      if (Act.thread(s, this.link, d.card, this.threadKind)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
+      const had = Pins.has(s, this.link, d.card);
+      if (Act.thread(s, this.link, d.card, this.threadKind)) { if (Pins.has(s, this.link, d.card)) SFX.thread(this.threadKind); else if (had) SFX.pin(); Store.put('auto', Save.pack(s)); }
       return this.render(true);
     }
     if (d.card) {
@@ -800,7 +974,7 @@ const UI = {
         SFX.paper();
         return this.hintBox();
       case 'mark':
-        if (Act.mark(s, d.id, d.v)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
+        if (Act.mark(s, d.id, d.v)) { SFX.stamp(); Store.put('auto', Save.pack(s)); }
         return this.render(true);
       case 'noteclr':
         if (Act.note(s, d.id, '')) { SFX.pin(); Store.put('auto', Save.pack(s)); }
@@ -813,17 +987,17 @@ const UI = {
         return this.render(true);
       case 'linkdone': SFX.paper(); this.sel = this.link; this.link = null; return this.render(true);
       case 'unthread': SFX.pin(); if (Act.thread(s, d.a, d.b)) Store.put('auto', Save.pack(s)); return this.render(true);
-      case 'arch': { const z = Pins.zone(d.v); if (!Act.archive(s, d.v, true)) return; SFX.paper(); this.sel = null; Store.put('auto', Save.pack(s)); this.toast('In ' + Pins.FOLDER[z] + ' gelegd. Via het mapje haal je de kaart terug.'); return this.render(); }
-      case 'archive': SFX.paper(); return this.archiveBox(d.v);
+      case 'arch': { const z = Pins.zone(d.v); if (!Act.archive(s, d.v, true)) return; SFX.folder(); this.sel = null; Store.put('auto', Save.pack(s)); this.toast('In ' + Pins.FOLDER[z] + ' gelegd. Via het mapje haal je de kaart terug.'); return this.render(); }
+      case 'archive': SFX.folder(); return this.archiveBox(d.v);
       case 'budgethelp': return this.toast('Je hebt vier dagen, elk van acht uur \'s ochtends tot tien uur \'s avonds. Lopen kost 15 tot 45 minuten, aanspreken en onderzoeken ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + '. Om twaalf en om vijf uur gaan de mensen naar hun volgende plek. Na dag ' + DAY.soft + ' koelt het spoor af en wordt je eindverslag minder sterk.', 7000);
       case 'mute': return this.toggleMute();
       case 'hotx': this.hot = null; return this.render(true);
-      case 'journal': SFX.paper(); return this.journal();
-      case 'dossier': SFX.paper(); return this.dossier();
+      case 'journal': SFX.folder(); return this.journal();
+      case 'dossier': SFX.folder(); return this.dossier();
       case 'system': SFX.paper(); return this.system();
       case 'unsel': this.sel = null; this.link = null; return this.render();
       case 'feedx': this.feed = []; return this.render();
-      case 'visit': SFX.paper(); return this.startVisit(d.v);
+      case 'visit': return this.startVisit(d.v);
       case 'leave': {
         this.hot = null; this.deltas = {}; this.showEv = false;
         const r = this.run((st) => Act.leave(st));
@@ -882,7 +1056,7 @@ const UI = {
       case 'topic': SFX.paper(); return this.runConv((st) => Act.topic(st, st.visit.conv, d.v, this.approach));
       case 'confront': SFX.seal(); return this.runConv((st) => Act.confront(st, d.v));
       case 'treat': SFX.pin(); return this.runConv((st) => Act.treat(st, d.v));
-      case 'evtoggle': SFX.paper(); this.showEv = !this.showEv; return this.render(true);
+      case 'evtoggle': SFX.folder(); this.showEv = !this.showEv; return this.render(true);
       case 'skip-type': return this.skipTranscript();
       case 'playev': {
         if (!s.visit || !s.visit.conv) return;
@@ -893,9 +1067,8 @@ const UI = {
           this.showEv = false;
           return this.runConv((st) => Act.confront(st, match.id));
         }
-        SFX.pin();
-        this.toast('Dit bewijsstuk weerlegt de verklaring van ' + U.first(npc) + ' niet.');
-        return;
+        SFX.miss();
+        return this.runConv((st) => Act.confrontWrong(st, d.v));
       }
     }
   },
@@ -1012,7 +1185,7 @@ const UI = {
       if (s.play.met[id]) {
         const tone = Rels.toneOf(s, id), lv = Level.get(s);
         const mk = Pins.mark(s, ref), note = Pins.note(s, ref);
-        h += `<div class="p-headrow"><div class="p-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 64 })}</div>` +
+        h += `<div class="p-headrow"><div class="p-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 64 })}</div>` +
           `<div><p class="p-role">${U.esc(n.role)}, ${n.age} jaar</p><p class="sp-note">Doet ${TONE_WORD[tone]} tegen je · houding: ${STANCE_LABEL[TONE_STANCE[tone]]}</p>` +
           (n.kenmerk ? `<p class="p-km"><b>Kenmerk:</b> ${U.esc(KENMERK[n.kenmerk].desc)}.</p>` : '') + `</div></div>`;
         const al = s.alibis && s.alibis[id], chk = s.play.alibiCheck && s.play.alibiCheck[id];
@@ -1161,7 +1334,7 @@ const UI = {
     let h = '<p class="sys">Wat hier ligt, telt gewoon mee in het zaakverslag. Je draadjes blijven bewaard.</p>' + items.map((id) => {
       const k = id.split(':')[0], ref = id.slice(k.length + 1), n = k === 'p' ? World.npc(s, ref) : null;
       const thumb = !n ? '' : s.play.met[ref]
-        ? '<span class="jframe" style="background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, w: 40 }) + '</span>'
+        ? '<span class="jframe" style="background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, tone: Rels.toneOf(s, ref), w: 40 }) + '</span>'
         : '<span class="jframe">' + Board.blank(40) + '</span>';
       return '<div class="arch-it">' + thumb +
         '<div><b>' + U.esc(Board.title(s, id)) + '</b><small>' + U.esc(sub(id)) + '</small></div>' + this.btn('Terug op het bord', { x: 'unarch', v: id }) + '</div>'; }).join('');
@@ -1232,7 +1405,7 @@ const UI = {
           const l = World.loc(s, x.locId);
           return PARTS[x.part] + ' bij ' + (l ? '<button type="button" class="mention m-l" data-mention="l:' + U.esc(l.id) + '">' + U.esc(l.name) + '</button>' : '?');
         }).join(' · ') + '</span>' : '';
-        return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(n.id) + '">' + U.esc(n.name) + '</button></b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span>' + tipLine + '</div></div>';
+        return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, tone: t, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(n.id) + '">' + U.esc(n.name) + '</button></b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span>' + tipLine + '</div></div>';
       }).join('') || '<p class="sys">Je hebt nog niemand gesproken.</p>');
       if (figs.length) h += '<h3>Bijfiguren</h3><p class="sys">' + figs.map((c) => U.esc(c.name + ', ' + c.role)).join(' · ') + '</p>';
     } else {

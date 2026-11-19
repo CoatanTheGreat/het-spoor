@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.15.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.16.0', schema: 8 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -207,6 +207,7 @@ const Content = {
     def('night.sleep', 'narr', 2, BASE, [], true); def('night.soft', 'narr', 2, ['day']); def('night.late', 'narr', 2); def('clock.closing', 'narr', 2, ['loc'], ['loc']);
     def('visit.leave', 'narr', 2, ['loc', 'part', 'next', 'weather'], ['loc']); def('day.wait', 'narr', 2, ['part', 'next', 'weather'], ['part']);
     def('confront.lead', 'narr', 2, ALL_VARS.concat(['title']), ['title']); def('confront.culprit.close', 'raw', 2, ALL_VARS.concat(['loc']), ['loc']); def('confront.culprit.distant', 'raw', 2, ALL_VARS);
+    ['warm', 'neutral', 'cold', 'hostile'].forEach((t) => def('confront.wrong.' + t, 'speech', 3, ALL_VARS.concat(['title'])));
     def('flip.culprit', 'narr', 2, ALL_VARS); def('flip.friend', 'narr', 2, ALL_VARS); def('flip.love', 'narr', 2, ALL_VARS);
     def('accuse.solved', 'narr', 1, BASE); def('accuse.mismatch', 'narr', 1); def('accuse.person', 'raw', 1, ALL_VARS); def('accuse.evidence', 'raw', 1, ALL_VARS);
     def('end.open', 'narr', 1, ALL_VARS.concat(['motive', 'method']), ['name']);
@@ -1509,6 +1510,25 @@ const Act = {
     }
     this._done(s);
   },
+  // v0.16.0: presenting wrong evidence during a confrontation produces an in-character NPC reply (100% leak-free, free of clock cost)
+  confrontWrong(s, evId) {
+    if (s.play.ended || !s.visit || !s.visit.conv) return null;
+    const npc = World.npc(s, s.visit.conv), ev = Evidence.get(s, evId);
+    if (!npc || !ev || !s.play.found[evId] || (s.play.debunked && s.play.debunked[evId])) return null;
+    const match = Dialogue.confronts(s, npc).find((c) => c.counterEvidence === evId);
+    if (match) { this.confront(s, match.id); return { ok: true, matched: true, conId: match.id }; }
+    Log.ask(s, npc, Dialogue.confrontLine(s, npc, ev.title), 'sharp');
+    const key = 'wrong:' + evId;
+    if (Dialogue.used(s, npc.id).indexOf(key) < 0) {
+      this._use(s, npc.id, key);
+      Rels.apply(s, npc.id, { suspicion: 2, resentment: 1 });
+    }
+    const tone = Rels.toneOf(s, npc.id);
+    Log.npc(s, npc, Text.speak(s, npc, 'confront.wrong.' + tone, Text.npcVars(s, npc, { title: ev.title })), tone);
+    Log.sys(s, ev.title + ' weerlegt de verklaring van ' + U.first(npc) + ' niet.');
+    this._done(s);
+    return { ok: false, matched: false };
+  },
   mingle(s, crowdId) {
     if (s.play.ended || !s.visit) return;
     const here = World.crowdHere(s); if (!here.length) { Log.sys(s, 'Er is hier niemand om mee te praten.'); return; }
@@ -2169,13 +2189,19 @@ const Tests = {
       });
       return { ok: !bad2.length, info: bad2.length ? bad2.slice(0, 3).join(' | ') : 'hoogste herhaling ' + worst.n + 'x' };
     });
-    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix + v0.15.0 Mentions/Hints) -----
-    t('Uiterlijk en verhoorscherm lekken de dader niet: silhouet, bord, verdachtenmatrix, tableau, tempo, verhoor, mentions en hints (10 seeds)', () => {
+    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix + v0.15.0 Mentions/Hints + v0.16.0 Woodcut portraits) -----
+    t('Uiterlijk en verhoorscherm lekken de dader niet: portretten, bord, verdachtenmatrix, tableau, tempo, verhoor, mentions en hints (10 seeds)', () => {
       const b2 = [];
       for (let i = 0; i < 10; i++) {
         const s = SpikeData.make('leak-' + i, 'laat'), fam = famOf(s);
         const render = (st) => {
-          const base = st.cast.slice().sort(byName).map((n) => Silhouette.svg(n, { fam: fam, mode: 'full' }) + (typeof Interrogation !== 'undefined' ? JSON.stringify(Interrogation.pace(n)) : '')).join('')
+          const base = st.cast.slice().sort(byName).map((n) => {
+            const tn = Rels.toneOf(st, n.id);
+            return Silhouette.svg(n, { s: st, fam: fam, mode: 'full', tone: tn })
+              + Silhouette.svg(n, { s: st, fam: fam, tone: tn, w: 72 })
+              + Silhouette.svg(n, { s: st, fam: fam, tone: tn, w: 40 })
+              + (typeof Interrogation !== 'undefined' ? JSON.stringify(Interrogation.pace(n)) : '');
+          }).join('')
             + Board.html(st, fam, null).html
             + Board.matrix(st, fam, null)
             + Mentions.linkHtml(st, st.crime.summary + ' ' + st.cast.slice().sort(byName).map((n) => n.name).join(' '))
@@ -2231,15 +2257,15 @@ const Tests = {
       }
       return { ok: !b2.length, info: b2.length ? b2.slice(0, 3).join(' | ') : Object.keys(kinds).sort().map((k) => k + ' ' + kinds[k]).join(', ') };
     });
-    t('Kaart: per onbekende één ?, hooguit drie, daarboven 3+; nooit een getal achter het vraagteken (' + nSeeds + ' seeds)', () => {
-      const b2 = [], u = (n) => MapGen.unknownBadges(n).join(' ');
-      if (u(0) !== '' || u(1) !== '?' || u(2) !== '? ?' || u(3) !== '? ? ?' || u(4) !== '? ? ? 3+' || u(16) !== '? ? ? 3+') b2.push('reeks ' + u(4));
+    t('Kaart (v0.16.0): hooguit één rustige onbekenden-badge per locatie (?, 2 ?, 3 ?, 3+ ?); nooit ?getal (' + nSeeds + ' seeds)', () => {
+      const b2 = [], u = (n) => MapGen.unknownBadges(n).join('|');
+      if (u(0) !== '' || u(1) !== '?' || u(2) !== '2 ?' || u(3) !== '3 ?' || u(4) !== '3+ ?' || u(16) !== '3+ ?') b2.push('reeks ' + u(4));
       for (let i = 0; i < nSeeds; i++) {
         const s = Game.create('unk-' + i), M = MapGen.build(s), svg = MapGen.svg(s, M, 0);
         if (/>\?\d/.test(svg)) b2.push('unk-' + i + ' ?getal');
         s.world.locations.forEach((l) => { const g = svg.split('data-stn="' + l.id + '"')[1].split('</g><g class="stn')[0], q = (g.match(/<g class="unk">/g) || []).length, more = (g.match(/<g class="unk-more">/g) || []).length;
           const n = World.openAt(l, 0) ? s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, 1, 0) === l.id).length : 0;
-          if (q !== Math.min(3, n) || more !== (n > 3 ? 1 : 0)) b2.push('unk-' + i + ' ' + l.template + ' ' + q + '/' + n); });
+          if (q !== (n === 1 ? 1 : 0) || more !== (n >= 2 ? 1 : 0)) b2.push('unk-' + i + ' ' + l.template + ' ' + q + '+' + more + '/' + n); });
       }
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
     });
@@ -2591,6 +2617,84 @@ const Tests = {
         if (!hLate || hLate.kind !== 'solve') bad.push('hnt-' + i + ' laat=' + (hLate && hLate.kind));
       }
       return { ok: !bad.length, info: bad.length ? bad.slice(0, 3).join(' | ') : nSeeds + ' seeds × 3 trappen OK' };
+    });
+    // ----- v0.16.0 (fase F): stylized woodcut portraits, deeper Tableaus, calm map badges, in-character confrontWrong -----
+    t('Portretten (v0.16.0): houtsnede-stijl met 4 herkenbare stemmingen (warm/neutral/cold/hostile) op 40 px, 72 px en full, 100% lekvrij (' + nSeeds + ' seeds)', () => {
+      const bad = [], tones = ['warm', 'neutral', 'cold', 'hostile'];
+      for (let i = 0; i < Math.min(nSeeds, 15); i++) {
+        const s = Game.create('port-' + i), fam = famOf(s), n = s.cast[0];
+        const w = U.clone(s); w.cast.reverse(); w.truth.culpritId = w.cast[0].id;
+        const svgs = tones.map((tn) => Silhouette.svg(n, { s: s, fam: fam, tone: tn, w: 72 }));
+        if (new Set(svgs).size !== 4) bad.push('port-' + i + ' niet 4 unieke stemmingen');
+        tones.forEach((tn, k) => {
+          if (svgs[k].indexOf('class="sil-expr" data-tone="' + tn + '"') < 0) bad.push('port-' + i + ' mist expr ' + tn);
+          const s40 = Silhouette.svg(n, { s: s, fam: fam, tone: tn, w: 40 });
+          const sFull = Silhouette.svg(n, { s: s, fam: fam, tone: tn, mode: 'full' });
+          if (s40.indexOf('data-tone="' + tn + '"') < 0 || sFull.indexOf('data-tone="' + tn + '"') < 0) bad.push('port-' + i + ' formaat ' + tn);
+          const leakCheck = Silhouette.svg(World.npc(w, n.id), { s: w, fam: fam, tone: tn, w: 72 });
+          if (leakCheck !== svgs[k]) bad.push('port-' + i + ' lek ' + tn);
+        });
+      }
+      return { ok: !bad.length, info: bad.length ? bad.slice(0, 3).join(' | ') : '4 stemmingen × 3 formaten lekvrij OK' };
+    });
+    t('Tableau (v0.16.0): rijkere architectuur en lichtval verschillen per dagdeel en tijdvak, met behoud van 960×540 grenzen', () => {
+      const bad = [], s = Game.create('tabf-1');
+      const fams = ['oud', 'klassiek', 'modern', 'toekomst'];
+      const loc = s.world.locations[0];
+      const byPart = [0, 1, 2].map((p) => Tableau.svg(s, loc.id, p, 'klassiek'));
+      if (new Set(byPart).size !== 3) bad.push('dagdelen identiek');
+      const byFam = fams.map((f) => Tableau.svg(s, loc.id, 1, f));
+      if (new Set(byFam).size !== 4) bad.push('tijdvakken identiek');
+      if (byPart.some((svg) => svg.indexOf('viewBox="0 0 960 540"') < 0 || svg.indexOf('<linearGradient') < 0)) bad.push('viewBox of licht-defs ontbreekt');
+      if (byPart[2].indexOf('_glow') < 0) bad.push('avondgloed ontbreekt');
+      return { ok: !bad.length, info: bad.length ? bad.join(' | ') : '3 dagdelen × 4 tijdvakken OK' };
+    });
+    t('Stadskaart-badges (v0.16.0): maximaal 3 bekende cirkels (+N) en 1 onbekenden-badge per locatie, zonder bijfiguur-drukte (' + nSeeds + ' seeds)', () => {
+      const bad = []; let maxStrip = 0;
+      for (let i = 0; i < nSeeds; i++) {
+        const s = Game.create('calm-' + i), M = MapGen.build(s);
+        s.cast.forEach((n) => { s.play.met[n.id] = true; });
+        s.crowd.slice(0, 6).forEach((c) => { s.play.metCrowd = s.play.metCrowd || {}; s.play.metCrowd[c.id] = true; });
+        const svg = MapGen.svg(s, M, 2);
+        s.world.locations.forEach((l) => {
+          const g = svg.split('data-stn="' + l.id + '"')[1].split('</g><g class="stn')[0];
+          const metB = (g.match(/class="met-b"/g) || []).length;
+          const metMore = (g.match(/class="met-more"/g) || []).length;
+          const unkB = (g.match(/class="unk"/g) || []).length + (g.match(/class="unk-more"/g) || []).length;
+          const tot = metB + metMore + unkB;
+          if (tot > maxStrip) maxStrip = tot;
+          if (metB > 3 || metMore > 1 || unkB > 1 || tot > 5) bad.push('calm-' + i + ' ' + l.id + ' tot=' + tot);
+        });
+      }
+      return { ok: !bad.length, info: bad.length ? bad.slice(0, 3).join(' | ') : 'max ' + maxStrip + ' badges per plek' };
+    });
+    t('Confrontatie fout bewijs (v0.16.0): in-character NPC-reactie per stemming, 0 minuten kost, 1× milde relatie-tik en lekvrij', () => {
+      const s = Game.create('cw-1', 'normaal'), npc = s.cast[0];
+      const wrongEv = s.evidence.find((e) => e.route !== 'start' && !s.contradictions.some((c) => c.npcId === npc.id && c.counterEvidence === e.id));
+      if (!wrongEv) return { ok: false, info: 'geen test-bewijsstuk' };
+      s.play.found[wrongEv.id] = { day: 1 };
+      this.meet(s, npc.id); Act.talkStart(s, npc.id);
+      const min0 = s.clock.min, log0 = s.log.length, sus0 = s.relations[npc.id].suspicion;
+      const r1 = Act.confrontWrong(s, wrongEv.id);
+      const min1 = s.clock.min, fresh1 = s.log.slice(log0), sus1 = s.relations[npc.id].suspicion;
+      const hasAsk = fresh1.some((e) => e.k === 'q' && e.npc === npc.id);
+      const hasNpc = fresh1.some((e) => e.k === 'p' && e.npc === npc.id && e.text.length > 15);
+      const hasSys = fresh1.some((e) => e.k === 's' && e.text.indexOf('weerlegt') >= 0);
+      // second attempt with same piece does not double-penalize relation
+      Act.confrontWrong(s, wrongEv.id);
+      const noDoublePen = s.relations[npc.id].suspicion === sus1 && sus1 === sus0 + 2;
+      // leak check: swapping culpritId & cast order yields identical reply text
+      const mkReply = (swap) => {
+        const st = Game.create('cw-2', 'normaal'), target = World.npc(st, st.cast[0].id);
+        const ev = st.evidence.find((e) => e.route !== 'start' && !st.contradictions.some((c) => c.npcId === target.id && c.counterEvidence === e.id));
+        st.play.found[ev.id] = { day: 1 }; this.meet(st, target.id); Act.talkStart(st, target.id);
+        if (swap) { st.truth.culpritId = st.cast[st.cast.length - 1].id; st.cast.reverse(); }
+        const n0 = st.log.length; Act.confrontWrong(st, ev.id);
+        return st.log.slice(n0).map((e) => e.k + ':' + e.text).join('|');
+      };
+      const leakFree = mkReply(false) === mkReply(true);
+      return { ok: r1 && !r1.matched && min0 === min1 && hasAsk && hasNpc && hasSys && noDoublePen && leakFree,
+        info: [hasAsk, hasNpc, hasSys, noDoublePen, leakFree].join(', ') };
     });
     return out;
   }

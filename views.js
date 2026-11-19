@@ -30,9 +30,10 @@ const TONE_STANCE = { warm: 0, neutral: 0, cold: 1, hostile: 2 };
 const STANCE_LABEL = ['open', 'gesloten', 'afwerend'];
 const byName = (a, b) => a.name.localeCompare(b.name, 'nl');
 
-/* ---------------- Silhouette: layered SVG figure (body, coat, headwear, hair, accessory) ----------------
+/* ---------------- Silhouette (v0.16.0): stylized ink-line / woodcut SVG portrait (0 KB) ----------------
    Only public fields feed the shape: name, gender, public role, age and the visible trait (kenmerk). Within a case the
-   look is made unique in name order (v0.10.0). Coordinates: 0..100 wide, feet at y=260. */
+   look is made unique in name order (v0.10.0). Mood expression (warm/neutral/cold/hostile) comes strictly from visible
+   relation tone (never culprit flag or cast order). Coordinates: 0..100 wide, feet at y=260. */
 const KM_FILL = '#f1e8cf', KM_LINE = '#1f2933';   // v0.10.0: the trait is light with a dark rim, readable on every role colour
 const BUST_VB = [4, 2, 92, 108];                    // x, y, w, h of the bust frame
 const Silhouette = {
@@ -62,6 +63,14 @@ const Silhouette = {
     t.sw = (f ? [14, 17, 20] : [16, 20, 24])[t.build] + t.sw0 % (f ? 2 : 3);
     t.head += t.build === 2 ? 1 : t.build === 0 ? -1 : 0;
     t.h = 0.86 + t.h0 * 0.22;
+    // v0.16.0: woodcut facial features appended after existing RNG draws so coat/hair/hat/build stay stable
+    t.jaw = r.int(3);
+    t.nose = r.int(3);
+    t.brow = r.int(3);
+    t.paperT = r.int(4);
+    t.gender = p.gender;
+    t.age = p.age;
+    t.stache = !f && p.age >= 38 && r.next() < 0.28;
     // v0.7.0: every person shows their trait (see KENMERK); without one there is no accessory
     t.acc = npc && npc.kenmerk ? npc.kenmerk : 'none';
     if (t.acc === 'glasses' && t.hat === 'visor') t.hat = 'none';
@@ -94,83 +103,169 @@ const Silhouette = {
     if (s && s.cast && npc && s.cast.some((x) => x.id === npc.id)) { const lk = this.looks(s, fam)[npc.id]; if (lk) Object.assign(t, lk); }
     return t;
   },
+  toneOf(o) {
+    if (o && o.tone && ['warm', 'neutral', 'cold', 'hostile'].indexOf(o.tone) >= 0) return o.tone;
+    const st = (o && o.stance) || 0;
+    return st === 1 ? 'cold' : st === 2 ? 'hostile' : 'neutral';
+  },
+  // v0.16.0: woodcut ink expression per mood (warm, neutral, cold, hostile), readable from 40 px to full
+  expression(t, g, tone, z, ink, hi) {
+    const cx = g.cx, hy = g.hy, ex = 4.7, ey = hy - 0.4;
+    const bw = ((t.brow === 2 ? 1.55 : t.brow === 1 ? 1.05 : 1.28) * (0.72 + 0.28 * z)).toFixed(2);
+    const mw = (1.35 * (0.76 + 0.24 * z)).toFixed(2);
+    const nw = (0.95 * (0.75 + 0.25 * z)).toFixed(2);
+    let brows = '', eyes = '', mouth = '', extras = '';
+    // nose bridge (subtle woodcut stroke)
+    const nose = t.nose === 0
+      ? `<path d="M${cx} ${ey + 0.6} L${cx - 0.5} ${hy + 4.3} L${cx + 1.1} ${hy + 4.5}" fill="none" stroke="${ink}" stroke-width="${nw}" stroke-linecap="round" stroke-linejoin="round" opacity=".72"/>`
+      : t.nose === 1
+      ? `<path d="M${cx} ${ey + 1.1} Q${cx + 1.0} ${hy + 3.2} ${cx - 0.6} ${hy + 4.2}" fill="none" stroke="${ink}" stroke-width="${nw}" stroke-linecap="round" opacity=".68"/>`
+      : `<path d="M${cx - 0.2} ${ey + 0.2} L${cx + 1.3} ${hy + 4.4} L${cx - 0.8} ${hy + 4.7}" fill="none" stroke="${ink}" stroke-width="${nw}" stroke-linecap="round" stroke-linejoin="round" opacity=".76"/>`;
+    if (tone === 'warm') {
+      brows = `<path d="M${cx - 8.2} ${hy - 4.9} Q${cx - 4.7} ${hy - 7.4} ${cx - 1.7} ${hy - 5.4} M${cx + 1.7} ${hy - 5.4} Q${cx + 4.7} ${hy - 7.4} ${cx + 8.2} ${hy - 4.9}" fill="none" stroke="${ink}" stroke-width="${bw}" stroke-linecap="round"/>`;
+      eyes = `<circle cx="${cx - ex}" cy="${ey}" r="${(1.45 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/><circle cx="${cx + ex}" cy="${ey}" r="${(1.45 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/>` +
+        `<circle cx="${cx - ex - 0.45}" cy="${ey - 0.45}" r="0.45" fill="${hi}"/><circle cx="${cx + ex - 0.45}" cy="${ey - 0.45}" r="0.45" fill="${hi}"/>` +
+        `<path d="M${cx - ex - 2.1} ${ey + 1.4} Q${cx - ex} ${ey + 0.5} ${cx - ex + 2.1} ${ey + 1.4} M${cx + ex - 2.1} ${ey + 1.4} Q${cx + ex} ${ey + 0.5} ${cx + ex + 2.1} ${ey + 1.4}" fill="none" stroke="${ink}" stroke-width="0.7" opacity=".45" stroke-linecap="round"/>`;
+      mouth = `<path d="M${cx - 4.7} ${hy + 7.4} Q${cx} ${hy + 11.4} ${cx + 4.7} ${hy + 7.4}" fill="none" stroke="${ink}" stroke-width="${mw}" stroke-linecap="round"/>`;
+      extras = `<path d="M${cx - 5.3} ${hy + 6.9} L${cx - 4.4} ${hy + 7.8} M${cx + 5.3} ${hy + 6.9} L${cx + 4.4} ${hy + 7.8}" stroke="${ink}" stroke-width="0.8" opacity=".45" stroke-linecap="round"/>`;
+    } else if (tone === 'cold') {
+      brows = `<path d="M${cx - 8.4} ${hy - 4.1} L${cx - 1.6} ${hy - 4.8} M${cx + 1.6} ${hy - 4.8} L${cx + 8.4} ${hy - 4.1}" fill="none" stroke="${ink}" stroke-width="${bw}" stroke-linecap="round"/>`;
+      eyes = `<path d="M${cx - ex - 2.3} ${ey - 1.1} L${cx - ex + 2.2} ${ey - 0.9} M${cx + ex - 2.2} ${ey - 0.9} L${cx + ex + 2.3} ${ey - 1.1}" stroke="${ink}" stroke-width="${(1.25 * (0.8 + 0.2 * z)).toFixed(2)}" stroke-linecap="round"/>` +
+        `<circle cx="${cx - ex}" cy="${ey + 0.3}" r="${(1.25 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/><circle cx="${cx + ex}" cy="${ey + 0.3}" r="${(1.25 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/>`;
+      mouth = `<path d="M${cx - 3.6} ${hy + 8.9} Q${cx} ${hy + 8.3} ${cx + 3.6} ${hy + 9.2}" fill="none" stroke="${ink}" stroke-width="${mw}" stroke-linecap="round"/>`;
+    } else if (tone === 'hostile') {
+      brows = `<path d="M${cx - 8.6} ${hy - 5.7} L${cx - 1.4} ${hy - 3.1} M${cx + 1.4} ${hy - 3.1} L${cx + 8.6} ${hy - 5.7}" fill="none" stroke="${ink}" stroke-width="${(parseFloat(bw) + 0.25).toFixed(2)}" stroke-linecap="round"/>` +
+        `<path d="M${cx - 0.9} ${hy - 4.6} L${cx - 0.9} ${hy - 2.4} M${cx + 0.9} ${hy - 4.6} L${cx + 0.9} ${hy - 2.4}" stroke="${ink}" stroke-width="0.85" opacity=".75" stroke-linecap="round"/>`;
+      eyes = `<path d="M${cx - ex - 2.3} ${ey - 1.4} L${cx - ex + 2.3} ${ey - 0.5} M${cx + ex - 2.3} ${ey - 0.5} L${cx + ex + 2.3} ${ey - 1.4}" stroke="${ink}" stroke-width="${(1.3 * (0.8 + 0.2 * z)).toFixed(2)}" stroke-linecap="round"/>` +
+        `<circle cx="${cx - ex + 0.2}" cy="${ey + 0.2}" r="${(1.32 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/><circle cx="${cx + ex - 0.2}" cy="${ey + 0.2}" r="${(1.32 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/>`;
+      mouth = `<path d="M${cx - 4.5} ${hy + 9.8} Q${cx} ${hy + 6.9} ${cx + 4.5} ${hy + 9.8}" fill="none" stroke="${ink}" stroke-width="${mw}" stroke-linecap="round"/>`;
+      extras = `<path d="M${cx - 2.2} ${hy + 10.9} Q${cx} ${hy + 10.4} ${cx + 2.2} ${hy + 10.9}" fill="none" stroke="${ink}" stroke-width="0.8" opacity=".55" stroke-linecap="round"/>`;
+    } else {
+      brows = `<path d="M${cx - 8.1} ${hy - 5.0} Q${cx - 4.7} ${hy - 5.9} ${cx - 1.7} ${hy - 5.0} M${cx + 1.7} ${hy - 5.0} Q${cx + 4.7} ${hy - 5.9} ${cx + 8.1} ${hy - 5.0}" fill="none" stroke="${ink}" stroke-width="${bw}" stroke-linecap="round"/>`;
+      eyes = `<path d="M${cx - ex - 2.1} ${ey - 1.2} Q${cx - ex} ${ey - 2.0} ${cx - ex + 2.1} ${ey - 1.1} M${cx + ex - 2.1} ${ey - 1.1} Q${cx + ex} ${ey - 2.0} ${cx + ex + 2.1} ${ey - 1.2}" fill="none" stroke="${ink}" stroke-width="0.85" opacity=".65" stroke-linecap="round"/>` +
+        `<circle cx="${cx - ex}" cy="${ey}" r="${(1.4 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/><circle cx="${cx + ex}" cy="${ey}" r="${(1.4 * (0.85 + 0.15 * z)).toFixed(2)}" fill="${ink}"/>`;
+      mouth = `<path d="M${cx - 3.8} ${hy + 8.4} Q${cx} ${hy + 8.9} ${cx + 3.8} ${hy + 8.4}" fill="none" stroke="${ink}" stroke-width="${mw}" stroke-linecap="round"/>` +
+        `<path d="M${cx - 1.6} ${hy + 10.1} Q${cx} ${hy + 10.6} ${cx + 1.6} ${hy + 10.1}" fill="none" stroke="${ink}" stroke-width="0.7" opacity=".4" stroke-linecap="round"/>`;
+    }
+    if (t.stache) {
+      extras += `<path d="M${cx - 4.8} ${hy + 6.9} Q${cx - 1.8} ${hy + 5.2} ${cx} ${hy + 6.3} Q${cx + 1.8} ${hy + 5.2} ${cx + 4.8} ${hy + 6.9}" fill="none" stroke="${ink}" stroke-width="${(1.45 * (0.8 + 0.2 * z)).toFixed(2)}" stroke-linecap="round"/>`;
+    }
+    if (t.age >= 52) {
+      extras += `<path d="M${cx - 7.8} ${hy + 3.4} Q${cx - 6.6} ${hy + 6.1} ${cx - 5.2} ${hy + 7.5} M${cx + 7.8} ${hy + 3.4} Q${cx + 6.6} ${hy + 6.1} ${cx + 5.2} ${hy + 7.5}" fill="none" stroke="${ink}" stroke-width="0.75" opacity=".32" stroke-linecap="round"/>`;
+    }
+    return `<g class="sil-expr" data-tone="${tone}">${brows}${eyes}${nose}${mouth}${extras}</g>`;
+  },
   // the trait as drawn: an svg string plus its bounding box (the box feeds the test 'kenmerk in beeld')
   kenmerk(t, g, bust, z) {
     const cx = g.cx, hy = g.hy, sy = g.sy, L = g.L, R = g.R, st = g.st, dk = (2.2 * z + 1.2).toFixed(2), lt = (1.6 * z).toFixed(2), rim = `stroke="${KM_LINE}" stroke-width="${(1.3 * z).toFixed(2)}"`;
     const twin = (d, w) => `<path d="${d}" fill="none" stroke="${KM_LINE}" stroke-width="${(w + 1.6 * z).toFixed(2)}" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${KM_FILL}" stroke-width="${w.toFixed(2)}" stroke-linecap="round"/>`;
     switch (t.acc) {
       case 'glasses': { const r = bust ? 3.6 + 0.5 * z : 3.6;
-        return { box: [cx - 5 - r, hy - r, 10 + 2 * r, 2 * r], svg: `<g fill="none" stroke-linecap="round"><g stroke="${KM_LINE}" stroke-width="${dk}"><circle cx="${cx - 5}" cy="${hy}" r="${r}"/><circle cx="${cx + 5}" cy="${hy}" r="${r}"/><path d="M${cx - 5 + r} ${hy} L${cx + 5 - r} ${hy}"/></g>` +
-          `<g stroke="${KM_FILL}" stroke-width="${lt}"><circle cx="${cx - 5}" cy="${hy}" r="${r}"/><circle cx="${cx + 5}" cy="${hy}" r="${r}"/></g></g>` }; }
-      case 'scarf': return { box: [cx - 11, sy - 4, 22, 37], svg: `<path d="M${cx - 10} ${sy - 4} L${cx + 10} ${sy - 4} L${cx + 11} ${sy + 4} L${cx - 11} ${sy + 4} Z M${cx + 3} ${sy + 3} L${cx + 9} ${sy + 32} L${cx + 3} ${sy + 33} L${cx - 1} ${sy + 4} Z" fill="${KM_FILL}" ${rim}/>` };
+        const gdk = bust ? dk : '2.35', glt = bust ? lt : '1.15';
+        return { box: [cx - 5 - r, hy - r, 10 + 2 * r, 2 * r], svg: `<g fill="none" stroke-linecap="round"><g stroke="${KM_LINE}" stroke-width="${gdk}"><circle cx="${cx - 5}" cy="${hy}" r="${r}"/><circle cx="${cx + 5}" cy="${hy}" r="${r}"/><path d="M${cx - 5 + r} ${hy} L${cx + 5 - r} ${hy}"/></g>` +
+          `<g stroke="${KM_FILL}" stroke-width="${glt}"><circle cx="${cx - 5}" cy="${hy}" r="${r}"/><circle cx="${cx + 5}" cy="${hy}" r="${r}"/><path d="M${cx - 5 + r} ${hy} L${cx + 5 - r} ${hy}"/></g></g>` }; }
+      case 'scarf': return { box: [cx - 11, sy - 4, 22, 37], svg: `<path d="M${cx - 10} ${sy - 4} L${cx + 10} ${sy - 4} L${cx + 11} ${sy + 4} L${cx - 11} ${sy + 4} Z M${cx + 3} ${sy + 3} L${cx + 9} ${sy + 32} L${cx + 3} ${sy + 33} L${cx - 1} ${sy + 4} Z" fill="${KM_FILL}" ${rim}/><path d="M${cx - 7} ${sy} L${cx + 7} ${sy} M${cx + 2} ${sy + 14} L${cx + 7} ${sy + 13} M${cx + 3} ${sy + 23} L${cx + 8} ${sy + 22}" stroke="${KM_LINE}" stroke-width="${(0.9 * z).toFixed(2)}" opacity=".55"/>` };
       case 'badge': { const r = bust ? 3.2 * z + 0.6 : 3.4, x = cx - t.sw / 2, y = sy + 16;
-        return { box: [x - r, y - r, 2 * r, 2 * r], svg: `<circle cx="${x}" cy="${y}" r="${r.toFixed(2)}" fill="${KM_FILL}" ${rim}/><circle cx="${x}" cy="${y}" r="${(r * 0.35).toFixed(2)}" fill="${KM_LINE}"/>` }; }
+        return { box: [x - r, y - r, 2 * r, 2 * r], svg: `<circle cx="${x}" cy="${y}" r="${r.toFixed(2)}" fill="${KM_FILL}" ${rim}/><circle cx="${x}" cy="${y}" r="${(r * 0.42).toFixed(2)}" fill="${KM_LINE}"/>` }; }
       case 'bag':
         if (bust) { const bx = R - 8, by = 90;
-          return { box: [bx, by, 20, 20], svg: twin(`M${L + 5} ${sy + 1} L${bx + 8} ${by + 2}`, 1.8 * z) + `<rect x="${bx}" y="${by}" width="20" height="18" rx="2.5" fill="${KM_FILL}" ${rim}/><path d="M${bx} ${by + 6} L${bx + 20} ${by + 6}" stroke="${KM_LINE}" stroke-width="${(1.1 * z).toFixed(2)}"/>` }; }
-        return { box: [R - 4, sy + 64, 17, 13], svg: twin(`M${L + 5} ${sy + 1} L${R + 3} ${sy + 66}`, 2) + `<rect x="${R - 4}" y="${sy + 64}" width="17" height="13" rx="2" fill="${KM_FILL}" ${rim}/>` };
+          return { box: [bx, by, 20, 20], svg: twin(`M${L + 5} ${sy + 1} L${bx + 8} ${by + 2}`, 1.8 * z) + `<rect x="${bx}" y="${by}" width="20" height="18" rx="2.5" fill="${KM_FILL}" ${rim}/><path d="M${bx} ${by + 6} L${bx + 20} ${by + 6}" stroke="${KM_LINE}" stroke-width="${(1.1 * z).toFixed(2)}"/><rect x="${bx + 8}" y="${by + 4.5}" width="4" height="4" rx="0.8" fill="${KM_LINE}"/>` }; }
+        return { box: [R - 4, sy + 64, 17, 13], svg: twin(`M${L + 5} ${sy + 1} L${R + 3} ${sy + 66}`, 2) + `<rect x="${R - 4}" y="${sy + 64}" width="17" height="13" rx="2" fill="${KM_FILL}" ${rim}/><path d="M${R - 4} ${sy + 69} L${R + 13} ${sy + 69}" stroke="${KM_LINE}" stroke-width="1.1"/>` };
       case 'book':
         if (bust) { const bx = cx + 1, by = sy + 14;
-          return { box: [bx, by, 18, 24], svg: `<g transform="rotate(-8 ${bx + 9} ${by + 12})"><rect x="${bx}" y="${by}" width="18" height="24" rx="1.5" fill="${KM_FILL}" ${rim}/><path d="M${bx + 4} ${by + 7} L${bx + 14} ${by + 7} M${bx + 4} ${by + 12} L${bx + 12} ${by + 12}" stroke="${KM_LINE}" stroke-width="${(1.1 * z).toFixed(2)}"/></g>` }; }
-        { const y = sy + (st === 2 ? 58 : 66); return { box: [L - 11, y, 11, 15], svg: `<rect x="${L - 11}" y="${y}" width="11" height="15" rx="1.5" fill="${KM_FILL}" ${rim}/>` }; }
+          return { box: [bx, by, 18, 24], svg: `<g transform="rotate(-8 ${bx + 9} ${by + 12})"><rect x="${bx}" y="${by}" width="18" height="24" rx="1.5" fill="${KM_FILL}" ${rim}/><path d="M${bx + 3} ${by} L${bx + 3} ${by + 24} M${bx + 6} ${by + 7} L${bx + 15} ${by + 7} M${bx + 6} ${by + 12} L${bx + 13} ${by + 12}" stroke="${KM_LINE}" stroke-width="${(1.05 * z).toFixed(2)}"/></g>` }; }
+        { const y = sy + (st === 2 ? 58 : 66); return { box: [L - 11, y, 11, 15], svg: `<rect x="${L - 11}" y="${y}" width="11" height="15" rx="1.5" fill="${KM_FILL}" ${rim}/><path d="M${L - 8} ${y} L${L - 8} ${y + 15}" stroke="${KM_LINE}" stroke-width="1"/>` }; }
       case 'cane':
         if (bust) return { box: [R - 2, sy - 9, 13, 120 - sy], svg: twin(`M${R + 8} 112 L${R + 8} ${sy + 2} q0 -10 -8 -10 q-6 0 -6 6`, 2.2 * z) };
         return { box: [R - 1, sy + 77, 13, 258 - sy - 77], svg: twin(`M${R + 6} ${sy + 84} L${R + 11} 258 M${R + 6} ${sy + 84} q-1 -7 -7 -5`, 2.6) };
       default: return { box: null, svg: '' };
     }
   },
-  // one figure as an SVG <g>; o: { fam, stance 0-2, color, accent, gap, rim, crowd, mode, w, s }
+  // one figure as an SVG <g>; o: { fam, stance 0-2, tone, color, accent, gap, rim, crowd, mode, w, s }
   figure(npc, o) {
-    o = o || {}; const fam = o.fam || 'klassiek', t = this.traits(npc, fam, o.s), st = o.stance || 0, pal = FAMILY[fam] ? FAMILY[fam].pal : FAMILY.klassiek.pal;
+    o = o || {}; const fam = o.fam || 'klassiek', t = this.traits(npc, fam, o.s), pal = FAMILY[fam] ? FAMILY[fam].pal : FAMILY.klassiek.pal;
+    const tone = this.toneOf(o), st = o.stance != null ? o.stance : (o.tone ? TONE_STANCE[tone] : 0);
     const bust = o.mode !== 'full', z = bust ? ((o.w || 64) < 56 ? 1.6 : 1.2) : 1;
-    const base = o.color || pal.ink, C = o.crowd ? Hex.mix(base, '#9aa0a6', 0.42) : Hex.mix(base, t.accent, t.mixT), A = o.accent || (o.crowd ? Hex.mix(t.accent, '#9aa0a6', 0.5) : t.accent);
+    const base = o.color || pal.ink, C = o.crowd ? Hex.mix(base, '#8d969e', 0.42) : Hex.mix(base, t.accent, t.mixT), A = o.accent || (o.crowd ? Hex.mix(t.accent, '#9aa0a6', 0.5) : t.accent);
+    const ink = o.crowd ? Hex.mix(pal.ink, '#5b646d', 0.35) : pal.ink;
+    const paperPal = fam === 'toekomst' ? ['#d7ece9', '#cce3e2', '#c3dbdc', '#d2e6e1'] : ['#f5ecd9', '#efe4cd', '#e8d9bd', '#f1e5ce'];
+    const faceFill = o.crowd ? Hex.mix(paperPal[t.paperT || 0], '#b8bec2', 0.38) : paperPal[t.paperT || 0];
+    const shade = Hex.mix(faceFill, ink, 0.17), hi = Hex.mix(faceFill, '#ffffff', 0.35);
+    const lw = (bust ? ((o.w || 64) < 56 ? 1.55 : 1.18) : 1.05).toFixed(2);
     const rim = o.rim === undefined ? pal.rim : o.rim;
     const cx = 50, r = t.head, hy = 40, top = hy - r, sw = t.sw, sy = 64, L = cx - sw, R = cx + sw, mir = (x) => 2 * cx - x;
     const covered = this.covered(t.hat);
     let back = '', body = '', head = '', front = '';
-    // hair and headwear behind the head
-    if (t.hair === 'long' && t.hat !== 'hood') back += `<path d="M${cx - r - 2} ${hy - 2} Q${cx - r - 5} ${hy + 32} ${cx - r + 1} ${sy + 28} L${cx + r - 1} ${sy + 28} Q${cx + r + 5} ${hy + 32} ${cx + r + 2} ${hy - 2} Z"/>`;
-    if (t.hair === 'bob' && !covered) back += `<path d="M${cx - r - 3} ${hy + r - 1} Q${cx - r - 5} ${top - 3} ${cx} ${top - 3} Q${cx + r + 5} ${top - 3} ${cx + r + 3} ${hy + r - 1} Z"/>`;
-    if (t.hat === 'hood') back += `<path d="M${cx - r - 8} ${sy + 10} C${cx - r - 11} ${top - 6} ${cx + r + 11} ${top - 6} ${cx + r + 8} ${sy + 10} Z"/>`;
-    if (t.hat === 'kap') back += `<ellipse cx="${cx}" cy="${hy - 1}" rx="${r + 4}" ry="${r + 5}" fill="${A}"/>`;
-    if (t.hat === 'collar') back += `<path d="M${cx - 14} ${sy + 2} L${cx - 13} ${hy + 2} L${cx - 6} ${hy + 10} L${cx - 6} ${sy} Z M${mir(cx - 14)} ${sy + 2} L${mir(cx - 13)} ${hy + 2} L${mir(cx - 6)} ${hy + 10} L${mir(cx - 6)} ${sy} Z"/>`;
-    // body: coat shapes
+    // hair and headwear behind the head (with woodcut contour & engraved highlights)
+    if (t.hair === 'long' && t.hat !== 'hood') back += `<path d="M${cx - r - 2} ${hy - 2} Q${cx - r - 5} ${hy + 32} ${cx - r + 1} ${sy + 28} L${cx + r - 1} ${sy + 28} Q${cx + r + 5} ${hy + 32} ${cx + r + 2} ${hy - 2} Z" stroke="${ink}" stroke-width="${lw}"/><path d="M${cx - r - 1} ${hy + 12} Q${cx - r - 2} ${hy + 28} ${cx - r + 2} ${sy + 22} M${cx + r + 1} ${hy + 12} Q${cx + r + 2} ${hy + 28} ${cx + r - 2} ${sy + 22}" fill="none" stroke="${hi}" stroke-width="0.9" opacity=".32"/>`;
+    if (t.hair === 'bob' && !covered) back += `<path d="M${cx - r - 3} ${hy + r - 1} Q${cx - r - 5} ${top - 3} ${cx} ${top - 3} Q${cx + r + 5} ${top - 3} ${cx + r + 3} ${hy + r - 1} Z" stroke="${ink}" stroke-width="${lw}"/>`;
+    if (t.hat === 'hood') back += `<path d="M${cx - r - 8} ${sy + 10} C${cx - r - 11} ${top - 6} ${cx + r + 11} ${top - 6} ${cx + r + 8} ${sy + 10} Z" stroke="${ink}" stroke-width="${lw}"/><path d="M${cx - r - 5} ${hy + 4} C${cx - r - 6} ${top - 1} ${cx + r + 6} ${top - 1} ${cx + r + 5} ${hy + 4}" fill="none" stroke="${hi}" stroke-width="1" opacity=".38"/>`;
+    if (t.hat === 'kap') back += `<ellipse cx="${cx}" cy="${hy - 1}" rx="${r + 4}" ry="${r + 5}" fill="${A}" stroke="${ink}" stroke-width="${lw}"/>`;
+    if (t.hat === 'collar') back += `<path d="M${cx - 14} ${sy + 2} L${cx - 13} ${hy + 2} L${cx - 6} ${hy + 10} L${cx - 6} ${sy} Z M${mir(cx - 14)} ${sy + 2} L${mir(cx - 13)} ${hy + 2} L${mir(cx - 6)} ${hy + 10} L${mir(cx - 6)} ${sy} Z" stroke="${ink}" stroke-width="${lw}"/>`;
+    // body: coat shapes with woodcut ink contour, lapels and engraving hatching
     const sh = `M${L} ${sy + 8} Q${L} ${sy} ${L + 9} ${sy - 1} L${R - 9} ${sy - 1} Q${R} ${sy} ${R} ${sy + 8}`;
-    const leg = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3"/>`;
-    if (t.coat === 'long') body += `<path d="${sh} L${R + 5} 202 L${L - 5} 202 Z"/>` + leg(cx - 12, 196, 10, 62) + leg(cx + 2, 196, 10, 62);
-    else if (t.coat === 'jacket') body += `<path d="${sh} L${R + 2} 150 L${L - 2} 150 Z"/><path d="M${cx - 14} 144 L${cx + 14} 144 L${cx + 13} 258 L${cx + 3} 258 L${cx} 172 L${cx - 3} 258 L${cx - 13} 258 Z"/>`;
-    else if (t.coat === 'dress') body += `<path d="${sh} L${R - 3} 118 L${R + 16} 226 L${L - 16} 226 L${L + 3} 118 Z"/>` + leg(cx - 9, 220, 6, 38) + leg(cx + 3, 220, 6, 38);
-    else if (t.coat === 'robe') body += `<path d="${sh} L${R + 10} 254 L${L - 10} 254 Z"/>`;
-    else body += `<path d="${sh} L${R + 6} 172 L${L - 6} 172 Z"/>` + leg(cx - 11, 166, 9, 92) + leg(cx + 2, 166, 9, 92) + `<rect x="${L - 2}" y="122" width="${2 * sw + 4}" height="5" fill="${A}"/>`;
+    const leg = (x, y, w, h) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="3" stroke="${ink}" stroke-width="1"/>`;
+    if (t.coat === 'long') body += `<path d="${sh} L${R + 5} 202 L${L - 5} 202 Z" stroke="${ink}" stroke-width="${lw}"/>` + leg(cx - 12, 196, 10, 62) + leg(cx + 2, 196, 10, 62);
+    else if (t.coat === 'jacket') body += `<path d="${sh} L${R + 2} 150 L${L - 2} 150 Z" stroke="${ink}" stroke-width="${lw}"/><path d="M${cx - 14} 144 L${cx + 14} 144 L${cx + 13} 258 L${cx + 3} 258 L${cx} 172 L${cx - 3} 258 L${cx - 13} 258 Z" stroke="${ink}" stroke-width="1"/>`;
+    else if (t.coat === 'dress') body += `<path d="${sh} L${R - 3} 118 L${R + 16} 226 L${L - 16} 226 L${L + 3} 118 Z" stroke="${ink}" stroke-width="${lw}"/>` + leg(cx - 9, 220, 6, 38) + leg(cx + 3, 220, 6, 38);
+    else if (t.coat === 'robe') body += `<path d="${sh} L${R + 10} 254 L${L - 10} 254 Z" stroke="${ink}" stroke-width="${lw}"/>`;
+    else body += `<path d="${sh} L${R + 6} 172 L${L - 6} 172 Z" stroke="${ink}" stroke-width="${lw}"/>` + leg(cx - 11, 166, 9, 92) + leg(cx + 2, 166, 9, 92) + `<rect x="${L - 2}" y="122" width="${2 * sw + 4}" height="5" fill="${A}" stroke="${ink}" stroke-width="0.9"/>`;
     body += `<ellipse cx="${cx - 8}" cy="258" rx="8" ry="3.4"/><ellipse cx="${cx + 8}" cy="258" rx="8" ry="3.4"/>`;
+    // woodcut lapels, seam, buttons and right-shoulder engraving hatch
+    body += `<path d="M${cx} ${sy + 14} L${cx} ${t.coat === 'jacket' ? 148 : 168}" stroke="${hi}" stroke-width="0.9" opacity=".32"/>`;
+    body += `<path d="M${cx - 8} ${sy} L${cx - 11} ${sy + 15} L${cx - 2} ${sy + 18} M${cx + 8} ${sy} L${cx + 11} ${sy + 15} L${cx + 2} ${sy + 18}" fill="none" stroke="${hi}" stroke-width="1.15" opacity=".48" stroke-linejoin="round"/>`;
+    body += `<path d="M${R - 6} ${sy + 7} L${R - 1} ${sy + 12} M${R - 7} ${sy + 13} L${R - 1} ${sy + 19} M${R - 7} ${sy + 20} L${R - 2} ${sy + 25}" stroke="${hi}" stroke-width="0.9" opacity=".34" stroke-linecap="round"/>`;
+    if (t.coat !== 'robe') body += `<circle cx="${cx + 2.5}" cy="${sy + 24}" r="1.25" fill="${hi}" opacity=".55"/><circle cx="${cx + 2.5}" cy="${sy + 35}" r="1.25" fill="${hi}" opacity=".55"/>`;
     // arms by stance: 0 open (hanging), 1 closed (folded), 2 defensive (hands on hips)
     if (st === 0) { const arm = `M${L + 2} ${sy + 4} Q${L - 6} ${sy + 10} ${L - 7} ${sy + 50} L${L - 5} ${sy + 86} Q${L - 1} ${sy + 92} ${L + 2} ${sy + 86} L${L + 4} ${sy + 30} Z`;
-      body += `<path d="${arm}"/><path d="${arm}" transform="translate(${2 * cx} 0) scale(-1 1)"/>`; }
+      body += `<path d="${arm}" stroke="${ink}" stroke-width="1"/><path d="${arm}" transform="translate(${2 * cx} 0) scale(-1 1)" stroke="${ink}" stroke-width="1"/>`; }
     if (st === 2) { const arm = `M${L + 1} ${sy + 4} L${L - 15} ${sy + 40} L${L + 3} ${sy + 64} L${L + 6} ${sy + 56} L${L - 5} ${sy + 40} L${L + 4} ${sy + 16} Z`;
-      body += `<path d="${arm}"/><path d="${arm}" transform="translate(${2 * cx} 0) scale(-1 1)"/>`; }
-    body += `<rect x="${cx - 5}" y="${hy + r - 5}" width="10" height="${sy - hy - r + 9}"/>`;
-    body += `<path d="M${cx - 6} ${sy - 2} L${cx} ${sy + 9} L${cx + 6} ${sy - 2} Z" fill="${A}"/>`;   // role mark: always visible
-    if (st === 1) body += `<rect x="${L - 5}" y="${sy + 30}" width="${2 * sw + 10}" height="16" rx="8" stroke="${o.gap || Hex.mix(C, '#ffffff', 0.3)}" stroke-width="1.6"/>`;
-    // head, hair on top, headwear
-    head += `<circle cx="${cx}" cy="${hy}" r="${r}"/>`;
-    if (t.hair === 'short' && !covered) head += `<circle cx="${cx}" cy="${hy - 2}" r="${r + 1.3}"/>`;
-    if (t.hair === 'bun' && !covered) head += `<circle cx="${cx + 2}" cy="${top - 3}" r="6"/>`;
-    if (t.hair === 'tail' && !covered) head += `<circle cx="${cx + r - 1}" cy="${hy - 5}" r="5"/><path d="M${cx + r} ${hy - 2} Q${cx + r + 9} ${hy + 14} ${cx + r + 3} ${hy + 30}" fill="none" stroke="${C}" stroke-width="6" stroke-linecap="round"/>`;
-    const band = (y, w) => `<rect x="${cx - w}" y="${y}" width="${2 * w}" height="3.2" fill="${A}"/>`;
-    if (t.hat === 'kap') head += `<path d="M${cx - r} ${hy - 1} Q${cx} ${top - 7} ${cx + r} ${hy - 1} Q${cx} ${top + 3} ${cx - r} ${hy - 1} Z" fill="${A}"/>`;
-    if (t.hat === 'cap') head += `<path d="M${cx - r - 1} ${hy - 3} Q${cx} ${top - 6} ${cx + r + 1} ${hy - 3} Z"/><ellipse cx="${cx + 3}" cy="${hy - 3}" rx="${r + 5}" ry="2.6"/>`;
-    if (t.hat === 'bowler') head += `<path d="M${cx - r + 1} ${top + 5} Q${cx - r + 1} ${top - 11} ${cx} ${top - 11} Q${cx + r - 1} ${top - 11} ${cx + r - 1} ${top + 5} Z"/><ellipse cx="${cx}" cy="${top + 5}" rx="${r + 6}" ry="2.8"/>` + band(top + 1, r - 1);
-    if (t.hat === 'top') head += `<rect x="${cx - r + 2}" y="${top - 20}" width="${2 * r - 4}" height="25"/><ellipse cx="${cx}" cy="${top + 4}" rx="${r + 6}" ry="2.8"/>` + band(top, r - 2);
-    if (t.hat === 'brim') head += `<path d="M${cx - r + 3} ${top + 5} Q${cx - r + 3} ${top - 8} ${cx} ${top - 8} Q${cx + r - 3} ${top - 8} ${cx + r - 3} ${top + 5} Z"/><ellipse cx="${cx}" cy="${top + 5}" rx="${r + 13}" ry="3.6"/>` + band(top + 1, r - 3);
-    if (t.hat === 'cloche') head += `<path d="M${cx - r - 3} ${hy + 1} Q${cx - r - 3} ${top - 5} ${cx} ${top - 6} Q${cx + r + 3} ${top - 5} ${cx + r + 3} ${hy + 1} Q${cx} ${hy - 6} ${cx - r - 3} ${hy + 1} Z"/>` + band(hy - 6, r + 1);
-    if (t.hat === 'beret') head += `<ellipse cx="${cx + 3}" cy="${top + 2}" rx="${r + 4}" ry="5.5" transform="rotate(-8 ${cx} ${top})"/>`;
-    if (t.hat === 'band') head += band(hy - 8, r);
-    if (t.hat === 'visor') head += `<rect x="${cx - r - 4}" y="${hy - 6}" width="${2 * r + 8}" height="9" rx="4.5" fill="${A}" opacity=".35"/><rect x="${cx - r - 2}" y="${hy - 4}" width="${2 * r + 4}" height="5" rx="2.5" fill="${A}"/>`;
+      body += `<path d="${arm}" stroke="${ink}" stroke-width="1"/><path d="${arm}" transform="translate(${2 * cx} 0) scale(-1 1)" stroke="${ink}" stroke-width="1"/>`; }
+    // paper-toned neck with chin shadow hatching + shirt collar + role accent
+    const ny = hy + r - 3, nh = Math.max(8, sy - ny + 5);
+    body += `<rect x="${cx - 4.8}" y="${ny}" width="9.6" height="${nh}" fill="${faceFill}" stroke="${ink}" stroke-width="${lw}"/>`;
+    body += `<path d="M${cx - 4.2} ${ny + 2} L${cx + 4.2} ${ny + 2} L${cx + 4.2} ${ny + 6.5} Q${cx} ${ny + 8} ${cx - 4.2} ${ny + 5.5} Z" fill="${shade}"/>`;
+    body += `<path d="M${cx - 7.5} ${sy - 1} L${cx} ${sy + 13} L${cx + 7.5} ${sy - 1} Z" fill="${faceFill}" stroke="${ink}" stroke-width="1"/>`;
+    body += `<path d="M${cx - 5.2} ${sy - 1} L${cx} ${sy + 10.5} L${cx + 5.2} ${sy - 1} Z" fill="${A}" stroke="${ink}" stroke-width="0.8"/>`;   // role mark: always visible
+    if (st === 1) body += `<rect x="${L - 5}" y="${sy + 30}" width="${2 * sw + 10}" height="16" rx="8" stroke="${o.gap || hi}" stroke-width="1.5"/><path d="M${cx - 8} ${sy + 34} L${cx + 10} ${sy + 42}" stroke="${hi}" stroke-width="1" opacity=".4"/>`;
+    // sculpted woodcut head (paper fill, ink contour, subtle ears, cheek shadow hatching)
+    const jw = t.jaw === 2 ? r * 0.96 : t.jaw === 0 ? r * 0.78 : r * 0.88;
+    const faceD = `M${cx - r} ${hy - 1} C${cx - r} ${top - 2} ${cx + r} ${top - 2} ${cx + r} ${hy - 1} C${cx + r} ${hy + r * 0.62} ${cx + jw * 0.68} ${hy + r + 1.4} ${cx} ${hy + r + 1.6} C${cx - jw * 0.68} ${hy + r + 1.4} ${cx - r} ${hy + r * 0.62} ${cx - r} ${hy - 1} Z`;
+    if (!covered && t.hair !== 'long' && t.hair !== 'bob') {
+      head += `<ellipse cx="${cx - r - 0.5}" cy="${hy + 1}" rx="2.1" ry="3.3" fill="${faceFill}" stroke="${ink}" stroke-width="1"/><ellipse cx="${cx + r + 0.5}" cy="${hy + 1}" rx="2.1" ry="3.3" fill="${faceFill}" stroke="${ink}" stroke-width="1"/>`;
+    }
+    head += `<path d="${faceD}" fill="${faceFill}" stroke="${ink}" stroke-width="${lw}"/>`;
+    // right-side woodcut cheek shading + fine diagonal engraving strokes
+    head += `<path d="M${cx + r * 0.52} ${top + 5} C${cx + r * 0.98} ${hy - 3} ${cx + r * 0.92} ${hy + r * 0.65} ${cx + 2} ${hy + r + 1.1} C${cx + r * 0.52} ${hy + r * 0.62} ${cx + r * 0.62} ${hy} ${cx + r * 0.52} ${top + 5} Z" fill="${shade}" opacity=".75"/>`;
+    head += `<path d="M${cx + r * 0.62} ${hy + 3} L${cx + r * 0.92} ${hy + 1.5} M${cx + r * 0.54} ${hy + 6.5} L${cx + r * 0.86} ${hy + 5} M${cx + r * 0.42} ${hy + 9.5} L${cx + r * 0.72} ${hy + 8.2}" stroke="${ink}" stroke-width="0.75" opacity=".36" stroke-linecap="round"/>`;
+    // hair framing the forehead (leaves face & expression completely clear)
+    if (!covered) {
+      if (t.hair === 'short') head += `<path d="M${cx - r - 0.8} ${hy - 2} C${cx - r - 1.4} ${top - 4.5} ${cx + r + 1.4} ${top - 4.5} ${cx + r + 0.8} ${hy - 2} Q${cx + r * 0.4} ${top + 4.5} ${cx - 2} ${top + 3.2} Q${cx - r * 0.7} ${top + 5.5} ${cx - r - 0.8} ${hy - 2} Z" stroke="${ink}" stroke-width="1"/><path d="M${cx - r * 0.5} ${top - 0.5} Q${cx} ${top - 2.6} ${cx + r * 0.55} ${top - 0.2}" fill="none" stroke="${hi}" stroke-width="0.95" opacity=".4"/>`;
+      else if (t.hair === 'crop') head += `<path d="M${cx - r - 0.2} ${hy - 3} C${cx - r - 0.4} ${top - 2.6} ${cx + r + 0.4} ${top - 2.6} ${cx + r + 0.2} ${hy - 3} Q${cx} ${top + 3.5} ${cx - r - 0.2} ${hy - 3} Z" stroke="${ink}" stroke-width="0.9"/>`;
+      else if (t.hair === 'bald') head += `<path d="M${cx - r - 0.5} ${hy - 2} Q${cx - r + 1.5} ${hy - 5} ${cx - r + 1.5} ${hy + 1} M${cx + r + 0.5} ${hy - 2} Q${cx + r - 1.5} ${hy - 5} ${cx + r - 1.5} ${hy + 1}" fill="none" stroke="${C}" stroke-width="2.4" stroke-linecap="round"/><path d="M${cx - 4.5} ${top + 2.8} Q${cx - 1} ${top + 1.4} ${cx + 2.5} ${top + 2.5}" fill="none" stroke="${hi}" stroke-width="1.1" opacity=".75" stroke-linecap="round"/>`;
+      else if (t.hair === 'bob') head += `<path d="M${cx - r - 1.5} ${hy + 1} C${cx - r - 2} ${top - 4} ${cx + r + 2} ${top - 4} ${cx + r + 1.5} ${hy + 1} Q${cx + r * 0.35} ${top + 3.8} ${cx} ${top + 2.4} Q${cx - r * 0.35} ${top + 3.8} ${cx - r - 1.5} ${hy + 1} Z" stroke="${ink}" stroke-width="1"/>`;
+      else if (t.hair === 'long') head += `<path d="M${cx - r - 1.2} ${hy} C${cx - r - 1.8} ${top - 4} ${cx + r + 1.8} ${top - 4} ${cx + r + 1.2} ${hy} Q${cx + 2} ${top + 3.6} ${cx} ${top + 1.8} Q${cx - 2} ${top + 3.6} ${cx - r - 1.2} ${hy} Z" stroke="${ink}" stroke-width="1"/>`;
+      else if (t.hair === 'bun') head += `<circle cx="${cx + 2}" cy="${top - 3.5}" r="5.8" stroke="${ink}" stroke-width="1"/><path d="M${cx - r - 0.6} ${hy - 2} C${cx - r - 1} ${top - 3.5} ${cx + r + 1} ${top - 3.5} ${cx + r + 0.6} ${hy - 2} Q${cx} ${top + 3.2} ${cx - r - 0.6} ${hy - 2} Z" stroke="${ink}" stroke-width="1"/>`;
+      else if (t.hair === 'tail') head += `<circle cx="${cx + r - 1}" cy="${hy - 5}" r="4.8" stroke="${ink}" stroke-width="1"/><path d="M${cx + r} ${hy - 2} Q${cx + r + 9} ${hy + 14} ${cx + r + 3} ${hy + 30}" fill="none" stroke="${C}" stroke-width="5.5" stroke-linecap="round"/><path d="M${cx - r - 0.5} ${hy - 2.5} C${cx - r - 0.8} ${top - 3.2} ${cx + r + 0.8} ${top - 3.2} ${cx + r + 0.5} ${hy - 2.5} Q${cx} ${top + 3} ${cx - r - 0.5} ${hy - 2.5} Z" stroke="${ink}" stroke-width="1"/>`;
+    }
+    // facial expression drawn cleanly onto the woodcut face
+    head += this.expression(t, { cx: cx, hy: hy, r: r }, tone, z, ink, hi);
+    // headwear (with crisp ink lines and highlights)
+    const band = (y, w) => `<rect x="${cx - w}" y="${y}" width="${2 * w}" height="3.2" fill="${A}" stroke="${ink}" stroke-width="0.7"/>`;
+    if (t.hat === 'kap') head += `<path d="M${cx - r - 0.5} ${hy - 2.5} Q${cx} ${top - 7} ${cx + r + 0.5} ${hy - 2.5} Q${cx} ${top + 3.5} ${cx - r - 0.5} ${hy - 2.5} Z" fill="${A}" stroke="${ink}" stroke-width="1"/>`;
+    if (t.hat === 'cap') head += `<path d="M${cx - r - 1} ${hy - 4.5} Q${cx} ${top - 6.5} ${cx + r + 1} ${hy - 4.5} Z" stroke="${ink}" stroke-width="1"/><ellipse cx="${cx + 3}" cy="${hy - 4.5}" rx="${r + 5}" ry="2.5" stroke="${ink}" stroke-width="1"/>`;
+    if (t.hat === 'bowler') head += `<path d="M${cx - r + 1} ${top + 4} Q${cx - r + 1} ${top - 11} ${cx} ${top - 11} Q${cx + r - 1} ${top - 11} ${cx + r - 1} ${top + 4} Z" stroke="${ink}" stroke-width="1"/><ellipse cx="${cx}" cy="${top + 4}" rx="${r + 6}" ry="2.7" stroke="${ink}" stroke-width="1"/>` + band(top, r - 1) + `<path d="M${cx - r * 0.4} ${top - 6.5} Q${cx} ${top - 9.2} ${cx + r * 0.35} ${top - 6.8}" fill="none" stroke="${hi}" stroke-width="0.95" opacity=".4"/>`;
+    if (t.hat === 'top') head += `<rect x="${cx - r + 2}" y="${top - 20}" width="${2 * r - 4}" height="24" stroke="${ink}" stroke-width="1"/><ellipse cx="${cx}" cy="${top + 3.5}" rx="${r + 6}" ry="2.7" stroke="${ink}" stroke-width="1"/>` + band(top - 0.5, r - 2) + `<line x1="${cx - r + 5}" y1="${top - 17}" x2="${cx - r + 5}" y2="${top - 2}" stroke="${hi}" stroke-width="1" opacity=".35"/>`;
+    if (t.hat === 'brim') head += `<path d="M${cx - r + 3} ${top + 4} Q${cx - r + 3} ${top - 8} ${cx} ${top - 8} Q${cx + r - 3} ${top - 8} ${cx + r - 3} ${top + 4} Z" stroke="${ink}" stroke-width="1"/><ellipse cx="${cx}" cy="${top + 4}" rx="${r + 13}" ry="3.5" stroke="${ink}" stroke-width="1"/>` + band(top, r - 3);
+    if (t.hat === 'cloche') head += `<path d="M${cx - r - 2.5} ${hy - 1.5} Q${cx - r - 2.5} ${top - 5} ${cx} ${top - 6} Q${cx + r + 2.5} ${top - 5} ${cx + r + 2.5} ${hy - 1.5} Q${cx} ${hy - 7.5} ${cx - r - 2.5} ${hy - 1.5} Z" stroke="${ink}" stroke-width="1"/>` + band(hy - 7.2, r + 0.5);
+    if (t.hat === 'beret') head += `<ellipse cx="${cx + 3}" cy="${top + 1.5}" rx="${r + 4}" ry="5.2" transform="rotate(-8 ${cx} ${top})" stroke="${ink}" stroke-width="1"/>`;
+    if (t.hat === 'band') head += band(top + 3.5, r - 0.5);
+    if (t.hat === 'visor') head += `<rect x="${cx - r - 3}" y="${hy - 4.8}" width="${2 * r + 6}" height="7.4" rx="3.7" fill="${A}" fill-opacity=".32" stroke="${A}" stroke-width="1.3"/><line x1="${cx - r}" y1="${hy - 2.6}" x2="${cx + r * 0.4}" y2="${hy - 2.6}" stroke="${hi}" stroke-width="0.9" opacity=".7"/>`;
     if (t.hat === 'collar') front += `<path d="M${cx - 13} ${hy + 2} L${cx - 6} ${hy + 10} M${mir(cx - 13)} ${hy + 2} L${mir(cx - 6)} ${hy + 10}" stroke="${A}" stroke-width="2" fill="none"/>`;
     // v0.10.0 (voorstel 14): the trait, also inside the bust frame and thicker in small portraits
     front += this.kenmerk(t, { cx: cx, hy: hy, sy: sy, L: L, R: R, st: st }, bust, z).svg;
     const tilt = st === 1 ? ' transform="translate(0 2) rotate(-5 50 56)"' : st === 2 ? ' transform="translate(0 -1) rotate(5 50 56)"' : '';
-    const stroke = rim ? ` stroke="${rim}" stroke-width="1.6" stroke-opacity=".75"` : '';
+    const stroke = rim ? ` stroke="${rim}" stroke-width="1.2" stroke-opacity=".65"` : '';
     return `<g fill="${C}"${stroke}><g transform="translate(50 260) scale(${(o.mode === 'full' ? t.h : 1).toFixed(3)}) translate(-50 -260)">${back}${body}<g${tilt}>${head}</g>${front}</g></g>`;
   },
   // box of the trait in figure coordinates (test helper); same geometry as figure()
@@ -181,7 +276,8 @@ const Silhouette = {
   svg(npc, o) {
     o = o || {}; const bust = o.mode !== 'full', vb = bust ? BUST_VB.join(' ') : '-8 -6 116 270';
     const w = o.w || (bust ? 64 : 60), h = o.h || Math.round(w * (bust ? 108 / 92 : 270 / 116));
-    return `<svg class="sil" viewBox="${vb}" width="${w}" height="${h}" aria-hidden="true">${this.figure(npc, Object.assign({}, o, { w: w }))}</svg>`;
+    const tone = this.toneOf(o);
+    return `<svg class="sil" data-tone="${tone}" viewBox="${vb}" width="${w}" height="${h}" aria-hidden="true">${this.figure(npc, Object.assign({}, o, { w: w, tone: tone }))}</svg>`;
   }
 };
 
@@ -327,7 +423,7 @@ const Board = {
     if (c.kind === 'person') {
       const n = World.npc(s, c.ref), tone = Rels.toneOf(s, n.id), r = s.relations[n.id];
       return `<div class="bc pc${clsExtra}" ${attr} style="${rotSt};--tone:${TONE_COLOR[tone]};--phbg:${F.photo}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
-        `<div class="pc-body"><div class="ph">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 68 })}</div>` +
+        `<div class="pc-body"><div class="ph">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 68 })}</div>` +
         `<div class="pt"><b>${U.esc(n.name)}</b><span>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</span>${n.kenmerk ? `<span class="km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : ''}<i>${U.esc(r.statusText)}${s.play.cleared[n.id] && Level.get(s).checkLabel ? '. Alibi bevestigd.' : ''}</i></div></div>${ex.foot}</div>`;
     }
     // v0.12.0: blank cards: a plain outline, the name and where you heard it; nothing else
@@ -355,9 +451,10 @@ const Board = {
     if (c.kind === 'claim' || c.kind === 'talk') {
       const con = c.kind === 'claim' ? s.contradictions.find((x) => x.id === c.ref) : null, e = con ? null : Evidence.get(s, c.ref);
       const who = World.npc(s, con ? con.npcId : (e.source.npcId || '')), text = con ? con.claim : e.text, title = con ? 'Verklaring van ' + who.name : e.title;
+      const wTone = who && s.play.met[who.id] ? Rels.toneOf(s, who.id) : 'neutral';
       const stamp = con && s.play.resolved[con.id] ? '<span class="stamp">doorgeprikt</span>' : e && e.source.type === 'confront' ? '<span class="stamp">bekentenis</span>' : '';
       return `<div class="bc st${stamp ? ' stamped' : ''}${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
-        `<div class="st-body"><div class="sp">${who ? Silhouette.svg(who, { s: s, fam: fam, w: 40 }) : ''}</div>` +
+        `<div class="st-body"><div class="sp">${who ? Silhouette.svg(who, { s: s, fam: fam, tone: wTone, w: 40 }) : ''}</div>` +
         `<div class="st-txt"><q>${U.esc(text)}</q><small>${U.esc(title)}</small></div>${stamp}</div>${ex.foot}</div>`;
     }
     const l = World.loc(s, c.ref);
@@ -490,7 +587,7 @@ const Board = {
         const cleared = !!(p.cleared[n.id] && lv.dim);
         h += `<tr class="${sel === pid ? 'sel' : ''}${cleared ? ' mx-cleared' : ''}${cur ? ' mx-m-' + cur : ''}">` +
           `<td data-label="Persoon"><button type="button" class="mx-who" data-card="${U.esc(pid)}" aria-pressed="${sel === pid ? 'true' : 'false'}">` +
-            `<span class="mx-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 38 })}</span>` +
+            `<span class="mx-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 38 })}</span>` +
             `<span class="mx-who-txt"><span class="mx-name-row"><span class="mx-ini" title="Beginletter ${ini}">${ini}</span><b>${U.esc(n.name)}</b></span><small>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</small></span>` +
           `</button></td>` +
           `<td data-label="Kenmerk">${n.kenmerk ? `<span class="mx-km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : '<span class="mx-mute">—</span>'}</td>` +
@@ -542,7 +639,7 @@ const Board = {
     }
     if (k === 'p') {
       const n = World.npc(s, ref), r = s.relations[n.id], tone = Rels.toneOf(s, n.id), bar = (lab, v, c) => `<span>${lab}</span><i role="progressbar" aria-label="${lab}" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="100" style="--v:${v}%;--c:${c}"></i><small class="rel-val">${v}</small>`;
-      h += `<div class="det-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 96 })}</div>`;
+      h += `<div class="det-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 96 })}</div>`;
       h += `<h3>${U.esc(n.name)}</h3><p>${U.esc(n.role)}, ${n.age} jaar. Doet ${TONE_WORD[tone]} tegen je; houding: ${STANCE_LABEL[TONE_STANCE[tone]]}.</p><p><i>${U.esc(r.statusText)}</i></p>`;
       h += `<h4 style="clear:both">Relatie</h4><div class="relbar">${bar('Vertrouwen', r.trust, '#3c7031')}${bar('Genegenheid', r.affection, '#b8821d')}${bar('Wrok', r.resentment, '#b33a28')}${bar('Argwaan', r.suspicion, '#2b6785')}</div>`;
       h += `<p class="sp-note" style="margin-top:10px">${U.esc(Rnd.cap(n.personality))}; ${U.esc(n.voice)}.</p>`;
@@ -881,8 +978,8 @@ const MapGen = {
     h += `<g transform="translate(1134 62)" opacity=".8"><circle r="26" fill="var(--sp-panel)" stroke="var(--sp-ink)" stroke-width="1.5"/><path d="M0 -22 L5 -5 L22 0 L5 5 L0 22 L-5 5 L-22 0 L-5 -5 Z" fill="none" stroke="var(--sp-ink)" stroke-width="1.3"/><path d="M0 -22 L4 -4 L-4 -4 Z" fill="var(--sp-thread)"/><text y="-29" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sp-ink)">N</text></g>`;
     M.bg = `<g pointer-events="none">${h}</g>`; return M.bg;
   },
-  // v0.11.0: one "?" per person you do not know yet, at most three; more than three shows a "3+" tag beside them
-  unknownBadges: (n) => n <= 0 ? [] : Array.from({ length: Math.min(3, n) }, () => '?').concat(n > 3 ? ['3+'] : []),
+  // v0.16.0: at most one calm badge for unknown people (?, 2 ?, 3 ?, or 3+ ?), never ?\d and never a row of ? ? ? 3+
+  unknownBadges: (n) => n <= 0 ? [] : n === 1 ? ['?'] : n <= 3 ? [n + ' ?'] : ['3+ ?'],
   svg(s, M, part, sel) {
     const P = M.pos, met = s.cast.filter((n) => s.play.met[n.id]).sort(byName), here = s.visit ? s.visit.locId : s.pos || null;
     const crimeLocId = s.crime && s.crime.crimeLocationId, victimLocId = s.crime && s.crime.victimLocationId;
@@ -896,37 +993,44 @@ const MapGen = {
       const tplCol = TEMPLATE_COLOR[l.template] || '#c98b4e';
       h += `<g class="stn${open ? '' : ' closed'}${here === l.id ? ' here' : ''}${sel === l.id ? ' sel' : ''}" data-stn="${l.id}" tabindex="0" role="button" aria-label="${U.esc(l.name + ariaExtra)}">`;
       h += `<circle cx="${p.x}" cy="${p.y}" r="30" fill="transparent"/>`;
-      if (here === l.id) h += `<circle cx="${p.x}" cy="${p.y}" r="31" fill="none" stroke="var(--sp-ink)" stroke-width="3" stroke-dasharray="5 4"><title>Hier ben je nu</title></circle>`;
-      if (l.id === s.startLoc) h += `<circle cx="${p.x}" cy="${p.y}" r="22" fill="none" stroke="var(--sp-thread)" stroke-width="3.5"><title>Hier logeer je</title></circle>`;
-      if (sel === l.id) h += `<circle class="selring" cx="${p.x}" cy="${p.y}" r="27" fill="none" stroke="var(--sp-thread)" stroke-width="4"/>`;
-      h += `<circle class="dot" cx="${p.x}" cy="${p.y}" r="14" fill="${open ? 'var(--sp-stn)' : 'var(--sp-line)'}" stroke="var(--sp-stnline)" stroke-width="3.5"${open ? '' : ' stroke-dasharray="4 3"'}/>`;
-      h += `<path d="M${p.x - 7} ${p.y + 5} L${p.x - 7} ${p.y - 2} L${p.x} ${p.y - 8} L${p.x + 7} ${p.y - 2} L${p.x + 7} ${p.y + 5} Z" fill="${open ? tplCol : 'var(--sp-mute)'}" stroke="var(--sp-stnline)" stroke-width="1.4"/>`;
-      if (isCrime) h += `<g transform="translate(${p.x - 16} ${p.y - 15})"><title>Plaats van het voorval (${U.esc(l.name)})</title><circle r="8.5" fill="#b3312a" stroke="var(--sp-mapbg)" stroke-width="2"/><path d="M-3.5 -3.5 L3.5 3.5 M3.5 -3.5 L-3.5 3.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/></g>`;
-      if (isVic) h += `<g transform="translate(${p.x + 16} ${p.y - 15})"><title>Werk/woning van ${U.esc(s.crime.victim.name)}</title><rect x="-7" y="-7" width="14" height="14" rx="2" transform="rotate(45)" fill="#c48a1c" stroke="var(--sp-mapbg)" stroke-width="2"/><circle r="2.2" fill="#fff"/></g>`;
+      if (here === l.id) h += `<circle cx="${p.x}" cy="${p.y}" r="30" fill="none" stroke="var(--sp-ink)" stroke-width="2.5" stroke-dasharray="5 4"><title>Hier ben je nu</title></circle>`;
+      if (l.id === s.startLoc) h += `<circle cx="${p.x}" cy="${p.y}" r="21" fill="none" stroke="var(--sp-thread)" stroke-width="3"><title>Hier logeer je</title></circle>`;
+      if (sel === l.id) h += `<circle class="selring" cx="${p.x}" cy="${p.y}" r="26" fill="none" stroke="var(--sp-thread)" stroke-width="3.5"/>`;
+      h += `<circle class="dot" cx="${p.x}" cy="${p.y}" r="14" fill="${open ? 'var(--sp-stn)' : 'var(--sp-line)'}" stroke="var(--sp-stnline)" stroke-width="3"${open ? '' : ' stroke-dasharray="4 3"'}/>`;
+      h += `<path d="M${p.x - 7} ${p.y + 5} L${p.x - 7} ${p.y - 2} L${p.x} ${p.y - 8} L${p.x + 7} ${p.y - 2} L${p.x + 7} ${p.y + 5} Z" fill="${open ? tplCol : 'var(--sp-mute)'}" stroke="var(--sp-stnline)" stroke-width="1.3"/>`;
+      if (isCrime) h += `<g transform="translate(${p.x - 16} ${p.y - 15})"><title>Plaats van het voorval (${U.esc(l.name)})</title><circle r="8" fill="#b3312a" stroke="var(--sp-mapbg)" stroke-width="2"/><path d="M-3.2 -3.2 L3.2 3.2 M3.2 -3.2 L-3.2 3.2" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></g>`;
+      if (isVic) h += `<g transform="translate(${p.x + 16} ${p.y - 15})"><title>Werk/woning van ${U.esc(s.crime.victim.name)}</title><rect x="-6.5" y="-6.5" width="13" height="13" rx="2" transform="rotate(45)" fill="#c48a1c" stroke="var(--sp-mapbg)" stroke-width="2"/><circle r="2" fill="#fff"/></g>`;
       h += `<text class="lbl" x="${lx.toFixed(1)}" y="${ly}" text-anchor="middle">${U.esc(l.name)}</text>`;
       if (!open) h += `<text class="sub" x="${lx.toFixed(1)}" y="${up ? ly - 17 : ly + 16}" text-anchor="middle">${part >= DAY.parts ? 'dicht, het is nacht' : 'dicht in de ' + PARTS[part]}</text>`;
-      // people present: known core people, known extras, and a "?" per stranger (at most three, then "3+")
+      // v0.16.0: calm badge strip: up to 3 met core suspects (+N overflow) and at most 1 compact unknown badge (met extras stay in stnDetail)
       const presentAll = open ? s.cast.concat(s.crowd).filter((n) => Schedule.at(s, n.id, s.clock.day, part) === l.id) : [];
-      const who = met.filter((n) => open && Schedule.at(s, n.id, s.clock.day, part) === l.id), fig = presentAll.filter((n) => !People.isCore(s, n.id) && People.known(s, n.id)).sort(byName);
+      const who = met.filter((n) => open && Schedule.at(s, n.id, s.clock.day, part) === l.id), fig = presentAll.filter((n) => !People.isCore(s, n.id) && People.known(s, n.id));
       const unk = Math.max(0, presentAll.length - who.length - fig.length);
-      const badges = who.map((n) => ({ kind: 'met', n: n })).concat(fig.map((n) => ({ kind: 'fig', n: n }))).concat(this.unknownBadges(unk).map((t) => ({ kind: t === '?' ? 'unk' : 'more', t: t })));
-      const by = up ? p.y + 30 : p.y - 30, step = 23, x0 = Math.max(16, Math.min(this.W - 16 - (badges.length - 1) * step, p.x - (badges.length - 1) * step / 2));
-      badges.forEach((b, k) => {
-        const x = +(x0 + k * step).toFixed(1), y = by;
-        if (b.kind === 'met') h += `<g><title>${U.esc(b.n.name)} (aanwezig)</title><circle cx="${x}" cy="${y}" r="10" fill="${Silhouette.accent(b.n.role)}" stroke="var(--sp-mapbg)" stroke-width="2"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${U.esc(b.n.name.charAt(0))}</text></g>`;
-        else if (b.kind === 'fig') h += `<g><title>${U.esc(b.n.name)} (bijfiguur)</title><circle cx="${x}" cy="${y}" r="10" fill="var(--sp-mute)" stroke="var(--sp-mapbg)" stroke-width="2"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="#fff">${U.esc(b.n.name.charAt(0))}</text></g>`;
-        else if (b.kind === 'unk') h += `<g class="unk"><title>Iemand die je nog niet kent</title><circle cx="${x}" cy="${y}" r="10" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="2" stroke-dasharray="3 2"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--sp-ink)">?</text></g>`;
-        else h += `<g class="unk-more"><title>Meer dan drie mensen die je nog niet kent</title><rect x="${x - 12}" y="${y - 9}" width="24" height="18" rx="9" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.6"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--sp-ink)">3+</text></g>`;
-      });
+      const badges = who.slice(0, 3).map((n) => ({ kind: 'met', n: n, w: 18 }));
+      if (who.length > 3) badges.push({ kind: 'met-more', n: who.length - 3, names: who.slice(3).map((n) => n.name).join(', '), w: 22 });
+      this.unknownBadges(unk).forEach((t) => { badges.push({ kind: t === '?' ? 'unk' : 'more', t: t, n: unk, w: t === '?' ? 18 : t.length > 3 ? 34 : 28 }); });
+      if (badges.length) {
+        const gap = 4, totalW = badges.reduce((a, b) => a + b.w, 0) + gap * (badges.length - 1);
+        let curX = Math.max(12, Math.min(this.W - 12 - totalW, p.x - totalW / 2));
+        const by = up ? p.y + 29 : p.y - 29;
+        badges.forEach((b) => {
+          const cx = +(curX + b.w / 2).toFixed(1), y = by;
+          if (b.kind === 'met') h += `<g class="met-b"><title>${U.esc(b.n.name)} (aanwezig)</title><circle cx="${cx}" cy="${y}" r="9" fill="${Silhouette.accent(b.n.role)}" stroke="var(--sp-mapbg)" stroke-width="1.8"/><text x="${cx}" y="${y + 3.5}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#fff">${U.esc(b.n.name.charAt(0))}</text></g>`;
+          else if (b.kind === 'met-more') h += `<g class="met-more"><title>Ook aanwezig: ${U.esc(b.names)}</title><rect x="${(cx - b.w / 2).toFixed(1)}" y="${y - 9}" width="${b.w}" height="18" rx="9" fill="var(--sp-ink)" stroke="var(--sp-mapbg)" stroke-width="1.6"/><text x="${cx}" y="${y + 3.5}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--sp-panel)">+${b.n}</text></g>`;
+          else if (b.kind === 'unk') h += `<g class="unk"><title>Eén persoon die je nog niet kent</title><circle cx="${cx}" cy="${y}" r="9" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.6" stroke-dasharray="2.5 2"/><text x="${cx}" y="${y + 3.5}" text-anchor="middle" font-size="10.5" font-weight="700" fill="var(--sp-ink)">?</text></g>`;
+          else h += `<g class="unk-more"><title>${b.n > 3 ? 'Meer dan drie mensen' : b.n + ' mensen'} die je nog niet kent</title><rect x="${(cx - b.w / 2).toFixed(1)}" y="${y - 9}" width="${b.w}" height="18" rx="9" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.5" stroke-dasharray="3 2"/><text x="${cx}" y="${y + 3.5}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--sp-ink)">${U.esc(b.t)}</text></g>`;
+          curX += b.w + gap;
+        });
+      }
       h += '</g>';
     });
     // legend, bottom left
     const cy = this.H - 126;
-    h += `<g class="cart" transform="translate(20 ${cy})" pointer-events="none"><rect width="376" height="114" rx="6" fill="var(--sp-panel)" stroke="var(--sp-ink)" stroke-width="2"/><text class="t" x="14" y="26">Kaart van ${U.esc(s.world.city.name)}</text>`;
-    h += `<circle cx="22" cy="46" r="6" fill="none" stroke="var(--sp-thread)" stroke-width="3"/><text x="34" y="50">logies</text>`;
+    h += `<g class="cart" transform="translate(20 ${cy})" pointer-events="none"><rect width="388" height="114" rx="6" fill="var(--sp-panel)" stroke="var(--sp-ink)" stroke-width="1.8"/><text class="t" x="14" y="26">Kaart van ${U.esc(s.world.city.name)}</text>`;
+    h += `<circle cx="22" cy="46" r="6" fill="none" stroke="var(--sp-thread)" stroke-width="2.8"/><text x="34" y="50">logies</text>`;
     h += `<circle cx="104" cy="46" r="6.5" fill="#b3312a"/><path d="M101.5 43.5 L106.5 48.5 M106.5 43.5 L101.5 48.5" stroke="#fff" stroke-width="1.6"/><text x="116" y="50">plaats delict</text>`;
     h += `<rect x="217" y="41" width="10" height="10" rx="1.5" transform="rotate(45 222 46)" fill="#c48a1c"/><text x="234" y="50">plek v. ${U.esc(vFirst)}</text>`;
-    h += `<circle cx="22" cy="72" r="7.5" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.8" stroke-dasharray="2 2"/><text x="22" y="76" text-anchor="middle" font-size="10" font-weight="700">?</text><text x="36" y="76" font-size="12">onbekende, 3+ is meer dan drie · dag ${s.clock.day}, ${PARTS[part]}</text>`;
+    h += `<rect x="13" y="64" width="28" height="16" rx="8" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.4" stroke-dasharray="2.5 2"/><text x="27" y="75.5" text-anchor="middle" font-size="9" font-weight="700" fill="var(--sp-ink)">2 ?</text><text x="48" y="76" font-size="12">onbekenden (3+ ? is meer dan drie) · dag ${s.clock.day}, ${PARTS[part]}</text>`;
     h += `<text x="14" y="98" fill="var(--sp-mute)" font-size="11">Tik op een plek voor details. Lopen kost 15 tot 45 minuten.</text></g>`;
     return h + '</svg>';
   },
@@ -1005,129 +1109,266 @@ const Tableau = {
     });
     return { loc: loc, part: part, open: open, kind: k, hs: hs };
   },
-  sky(part, fam, x, y, w, h) {
-    const col = fam === 'toekomst' ? ['#3d6b7a', '#2c5a78', '#0b1626'][part] : ['#d7e6e4', '#9cc6d6', '#24324a'][part];
-    let g = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${col}"/>`;
-    if (part === 0) g += `<circle cx="${x + w * 0.25}" cy="${y + h * 0.8}" r="${Math.min(w, h) * 0.16}" fill="#fbe8b4"/>`;
-    if (part === 1) g += `<ellipse cx="${x + w * 0.6}" cy="${y + h * 0.3}" rx="${w * 0.22}" ry="${h * 0.07}" fill="#fff" opacity=".7"/>`;
-    if (part === 2) { g += `<circle cx="${x + w * 0.72}" cy="${y + h * 0.28}" r="${Math.min(w, h) * 0.09}" fill="#f2ecd2"/>`; for (let i = 0; i < 7; i++) g += `<circle cx="${(x + (i * 37 % w)).toFixed(0)}" cy="${(y + 8 + (i * 23 % (h * 0.6))).toFixed(0)}" r="1.4" fill="#f2ecd2"/>`; }
+  defs(M, P, fam, idP) {
+    const p = Math.min(2, Math.max(0, M.part)), wall = M.kind === 'herberg' ? P.wall : Hex.mix(P.wall, TEMPLATE_COLOR[M.loc.template] || P.wall, 0.26);
+    const skyTop = fam === 'toekomst' ? ['#295368', '#1e4260', '#070f1d'][p] : ['#9bbcc7', '#6da7c7', '#131d32'][p];
+    const skyBot = fam === 'toekomst' ? ['#5ea49c', '#3c778c', '#182b44'][p] : ['#f4dfb9', '#d2e4ea', '#2d3f5e'][p];
+    const sunCol = fam === 'toekomst' ? P.accent : (p === 0 ? '#ffe59e' : '#fff7dc');
+    const glowCol = fam === 'toekomst' ? P.accent : '#ffcf72';
+    return `<defs>` +
+      `<linearGradient id="${idP}_sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${skyTop}"/><stop offset="100%" stop-color="${skyBot}"/></linearGradient>` +
+      `<linearGradient id="${idP}_wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${Hex.mix(wall, '#000000', 0.14)}"/><stop offset="35%" stop-color="${wall}"/><stop offset="100%" stop-color="${Hex.mix(wall, '#000000', 0.18)}"/></linearGradient>` +
+      `<linearGradient id="${idP}_floor" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${Hex.mix(P.floor, '#000000', 0.24)}"/><stop offset="32%" stop-color="${P.floor}"/><stop offset="100%" stop-color="${Hex.mix(P.floor, '#000000', 0.12)}"/></linearGradient>` +
+      `<linearGradient id="${idP}_sun" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0%" stop-color="${sunCol}" stop-opacity="${p === 0 ? 0.34 : 0.22}"/><stop offset="100%" stop-color="${sunCol}" stop-opacity="0"/></linearGradient>` +
+      `<radialGradient id="${idP}_glow"><stop offset="0%" stop-color="${glowCol}" stop-opacity="${fam === 'toekomst' ? 0.36 : 0.62}"/><stop offset="55%" stop-color="${glowCol}" stop-opacity="${fam === 'toekomst' ? 0.12 : 0.2}"/><stop offset="100%" stop-color="${glowCol}" stop-opacity="0"/></radialGradient>` +
+      `<radialGradient id="${idP}_hearth"><stop offset="0%" stop-color="#ff9d3b" stop-opacity="0.58"/><stop offset="60%" stop-color="#e86a1f" stop-opacity="0.16"/><stop offset="100%" stop-color="#e86a1f" stop-opacity="0"/></radialGradient>` +
+      `</defs>`;
+  },
+  sky(part, fam, x, y, w, h, idP) {
+    const p = Math.min(2, Math.max(0, part));
+    const fill = idP ? `url(#${idP}_sky)` : (fam === 'toekomst' ? ['#3d6b7a', '#2c5a78', '#0b1626'][p] : ['#d7e6e4', '#9cc6d6', '#24324a'][p]);
+    let g = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`;
+    if (p === 0) {
+      const sx = x + w * 0.24, sy = y + h * 0.76, sr = Math.min(w, h) * 0.15;
+      g += `<circle cx="${sx}" cy="${sy}" r="${(sr * 1.9).toFixed(1)}" fill="#fde5a8" opacity=".28"/><circle cx="${sx}" cy="${sy}" r="${sr.toFixed(1)}" fill="#fff0c2" opacity=".92"/>`;
+      g += `<rect x="${x}" y="${y + h * 0.74}" width="${w}" height="${h * 0.26}" fill="#f7e6c4" opacity=".24"/>`;
+    }
+    if (p === 1) {
+      g += `<ellipse cx="${x + w * 0.62}" cy="${y + h * 0.28}" rx="${w * 0.21}" ry="${h * 0.065}" fill="#fff" opacity=".62"/>` +
+        `<ellipse cx="${x + w * 0.28}" cy="${y + h * 0.42}" rx="${w * 0.14}" ry="${h * 0.045}" fill="#fff" opacity=".45"/>`;
+    }
+    if (p >= 2) {
+      const mx = x + w * 0.74, my = y + h * 0.26, mr = Math.min(w, h) * 0.085;
+      g += `<circle cx="${mx}" cy="${my}" r="${(mr * 2.1).toFixed(1)}" fill="#dfe8f6" opacity=".16"/><circle cx="${mx}" cy="${my}" r="${mr.toFixed(1)}" fill="#f5efd4"/>`;
+      for (let i = 0; i < 11; i++) g += `<circle cx="${(x + 12 + (i * 47 % Math.max(20, w - 24))).toFixed(0)}" cy="${(y + 8 + (i * 29 % Math.max(16, h * 0.64))).toFixed(0)}" r="${i % 3 === 0 ? 1.6 : 1.1}" fill="#f2ecd2" opacity="${i % 2 ? 0.85 : 0.55}"/>`;
+    }
     return g;
   },
-  window(fam, part, x, y, w, h, P) {
-    const sill = `<rect x="${x - 8}" y="${y + h}" width="${w + 16}" height="10" fill="${P.wood2}"/>`;
-    let g = this.sky(part, fam, x, y, w, h);
+  window(fam, part, x, y, w, h, P, idP) {
+    const p = Math.min(2, Math.max(0, part)), sill = `<rect x="${x - 10}" y="${y + h}" width="${w + 20}" height="11" rx="2" fill="${P.wood2}" stroke="${P.ink}" stroke-width="1.2" stroke-opacity=".45"/>`;
+    let g = this.sky(p, fam, x, y, w, h, idP);
+    // subtle distant roofline silhouette visible outside the window
+    g += `<path d="M${x} ${y + h} L${x} ${y + h * 0.72} L${x + w * 0.34} ${y + h * 0.58} L${x + w * 0.62} ${y + h * 0.74} L${x + w} ${y + h * 0.62} L${x + w} ${y + h} Z" fill="${P.ink}" opacity="${p >= 2 ? 0.45 : 0.18}"/>`;
+    const clipId = (idP || 'tb') + '_wclip_' + x;
     if (fam === 'oud') {
       const arch = `M${x} ${y + h} L${x} ${y + w / 2} A${w / 2} ${w / 2} 0 0 1 ${x + w} ${y + w / 2} L${x + w} ${y + h} Z`;
-      for (let i = -8; i < 8; i++) { const x0 = x + i * 22; g += `<path d="M${x0} ${y} L${x0 + h} ${y + h} M${x0 + w} ${y} L${x0 + w - h} ${y + h}" stroke="${P.ink}" stroke-width="1.5" opacity=".5"/>`; }
-      return `<g><clipPath id="wclip"><path d="${arch}"/></clipPath><g clip-path="url(#wclip)">${g}</g><path d="${arch}" fill="none" stroke="${P.wood}" stroke-width="10"/>${sill}</g>`;
+      for (let i = -8; i < 8; i++) { const x0 = x + i * 22; g += `<path d="M${x0} ${y} L${x0 + h} ${y + h} M${x0 + w} ${y} L${x0 + w - h} ${y + h}" stroke="${P.ink}" stroke-width="1.4" opacity=".46"/>`; }
+      return `<g><clipPath id="${clipId}"><path d="${arch}"/></clipPath><g clip-path="url(#${clipId})">${g}</g><path d="${arch}" fill="none" stroke="${P.stone}" stroke-width="14" opacity=".6"/><path d="${arch}" fill="none" stroke="${P.wood}" stroke-width="9"/>${sill}</g>`;
     }
-    if (fam === 'klassiek') g += `<path d="M${x + w / 2} ${y} L${x + w / 2} ${y + h} M${x} ${y + h / 2} L${x + w} ${y + h / 2}" stroke="${P.trim}" stroke-width="6"/><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${P.trim}" stroke-width="10"/>` +
-      `<path d="M${x - 14} ${y - 6} L${x + 8} ${y + h + 10} L${x - 14} ${y + h + 10} Z M${x + w + 14} ${y - 6} L${x + w - 8} ${y + h + 10} L${x + w + 14} ${y + h + 10} Z" fill="${P.accent}" opacity=".85"/>`;
-    if (fam === 'modern') { for (let i = 1; i < 9; i++) g += `<rect x="${x}" y="${y + i * h / 9 - 3}" width="${w}" height="4" fill="${P.trim}" opacity=".8"/>`; g += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#e9e4d6" stroke-width="8"/>`; }
-    if (fam === 'toekomst') return `<g>${g}<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${P.accent}" stroke-width="3"/><rect x="${x - 6}" y="${y - 6}" width="${w + 12}" height="${h + 12}" rx="8" fill="none" stroke="${P.accent}" stroke-opacity=".3" stroke-width="6"/></g>`;
+    if (fam === 'klassiek') g += `<path d="M${x + w / 2} ${y} L${x + w / 2} ${y + h} M${x} ${y + h / 2} L${x + w} ${y + h / 2}" stroke="${P.trim}" stroke-width="5.5"/><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${P.trim}" stroke-width="9"/>` +
+      `<rect x="${x - 16}" y="${y - 10}" width="${w + 32}" height="9" rx="2" fill="${P.wood2}"/><path d="M${x - 14} ${y - 4} Q${x + 12} ${y + h * 0.55} ${x + 4} ${y + h + 12} L${x - 16} ${y + h + 12} Z M${x + w + 14} ${y - 4} Q${x + w - 12} ${y + h * 0.55} ${x + w - 4} ${y + h + 12} L${x + w + 16} ${y + h + 12} Z" fill="${P.accent}" opacity=".88"/>` +
+      `<path d="M${x - 8} ${y} L${x - 6} ${y + h + 10} M${x + w + 8} ${y} L${x + w + 6} ${y + h + 10}" stroke="#000" stroke-width="1.5" opacity=".18"/>`;
+    if (fam === 'modern') { for (let i = 1; i < 9; i++) g += `<rect x="${x}" y="${y + i * h / 9 - 3}" width="${w}" height="3.5" fill="${P.trim}" opacity=".76"/>`; g += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="#e9e4d6" stroke-width="8"/><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${P.ink}" stroke-width="1.2" opacity=".35"/>`; }
+    if (fam === 'toekomst') return `<g>${g}<path d="M${x} ${y + h * 0.25} L${x + w} ${y + h * 0.25} M${x} ${y + h * 0.75} L${x + w} ${y + h * 0.75}" stroke="${P.accent}" stroke-width="1" opacity=".28"/><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${P.accent}" stroke-width="3"/><rect x="${x - 6}" y="${y - 6}" width="${w + 12}" height="${h + 12}" rx="8" fill="none" stroke="${P.accent}" stroke-opacity=".28" stroke-width="5"/></g>`;
     return `<g>${g}${sill}</g>`;
   },
-  lamp(fam, x, P) {
-    if (fam === 'oud') return `<g><path d="M${x} 26 L${x} 70" stroke="${P.ink}" stroke-width="2"/><ellipse cx="${x}" cy="74" rx="38" ry="6" fill="none" stroke="${P.wood}" stroke-width="5"/>` +
-      [-30, -10, 10, 30].map((d) => `<rect x="${x + d - 2.5}" y="58" width="5" height="14" fill="#efe3c1"/><path d="M${x + d} 50 q-3 4 0 8 q3 -4 0 -8" fill="#ffcf5a"/>`).join('') + '</g>';
-    if (fam === 'klassiek') return `<g><path d="M${x} 26 L${x} 84" stroke="${P.ink}" stroke-width="2"/><path d="M${x - 16} 108 Q${x} 78 ${x + 16} 108 Z" fill="#f4d98a" opacity=".9"/><rect x="${x - 18}" y="106" width="36" height="7" rx="3" fill="${P.wood}"/><path d="M${x - 9} 84 L${x + 9} 84 L${x + 5} 92 L${x - 5} 92 Z" fill="${P.wood}"/></g>`;
-    if (fam === 'modern') return `<g><path d="M${x} 26 L${x} 90" stroke="${P.ink}" stroke-width="2"/><path d="M${x - 34} 120 Q${x} 72 ${x + 34} 120 Z" fill="${P.accent}"/><ellipse cx="${x}" cy="120" rx="34" ry="5" fill="#ffe7a8"/></g>`;
-    return `<rect x="${x - 70}" y="30" width="140" height="6" rx="3" fill="${P.accent}"/><rect x="${x - 76}" y="26" width="152" height="14" rx="7" fill="${P.accent}" opacity=".25"/>`;
+  lamp(fam, x, P, part) {
+    const lit = part >= 2;
+    if (fam === 'oud') return `<g><path d="M${x} 26 L${x} 70" stroke="${P.ink}" stroke-width="2.2"/><ellipse cx="${x}" cy="74" rx="38" ry="6" fill="none" stroke="${P.wood}" stroke-width="5"/>` +
+      [-30, -10, 10, 30].map((d) => `<rect x="${x + d - 2.5}" y="58" width="5" height="14" fill="#efe3c1"/><path d="M${x + d} 49 q-3.5 4.5 0 9 q3.5 -4.5 0 -9" fill="${lit ? '#ffda66' : '#f4be48'}"/>${lit ? `<circle cx="${x + d}" cy="53" r="9" fill="#ffd26a" opacity=".28"/>` : ''}`).join('') + '</g>';
+    if (fam === 'klassiek') return `<g><path d="M${x} 26 L${x} 84" stroke="${P.ink}" stroke-width="2"/><path d="M${x - 18} 108 Q${x} 76 ${x + 18} 108 Z" fill="${lit ? '#ffe28f' : '#e8cf86'}" opacity=".92"/><rect x="${x - 20}" y="106" width="40" height="7" rx="3" fill="${P.wood}"/><path d="M${x - 9} 84 L${x + 9} 84 L${x + 5} 92 L${x - 5} 92 Z" fill="${P.wood}"/>${lit ? `<ellipse cx="${x}" cy="112" rx="22" ry="8" fill="#ffd978" opacity=".32"/>` : ''}</g>`;
+    if (fam === 'modern') return `<g><path d="M${x} 26 L${x} 90" stroke="${P.ink}" stroke-width="2"/><path d="M${x - 34} 120 Q${x} 72 ${x + 34} 120 Z" fill="${P.accent}" stroke="${P.ink}" stroke-width="1.2" stroke-opacity=".35"/><ellipse cx="${x}" cy="120" rx="34" ry="5" fill="${lit ? '#fff0bd' : '#e6d39c'}"/></g>`;
+    return `<g><rect x="${x - 70}" y="30" width="140" height="6" rx="3" fill="${P.accent}"/><rect x="${x - 76}" y="26" width="152" height="14" rx="7" fill="${P.accent}" opacity="${lit ? 0.36 : 0.2}"/></g>`;
   },
-  back(M, P, fam) {
-    const tpl = M.loc.template, k = M.kind, part = M.part, wall = k === 'herberg' ? P.wall : Hex.mix(P.wall, TEMPLATE_COLOR[tpl] || P.wall, 0.28);
+  back(M, P, fam, idP) {
+    const tpl = M.loc.template, k = M.kind, part = Math.min(2, Math.max(0, M.part)), wall = k === 'herberg' ? P.wall : Hex.mix(P.wall, TEMPLATE_COLOR[tpl] || P.wall, 0.26);
     let g = '';
     if (k !== 'outside') {
-      g += `<rect width="960" height="410" fill="${wall}"/><rect y="298" width="960" height="112" fill="${Hex.mix(P.wood2, wall, 0.25)}"/><rect y="292" width="960" height="8" fill="${P.trim}" opacity=".7"/>`;
-      if (fam === 'klassiek') for (let x = 30; x < 960; x += 60) g += `<rect x="${x}" y="0" width="20" height="292" fill="#000" opacity=".05"/>`;
-      if (fam === 'toekomst') for (let x = 0; x < 960; x += 120) g += `<rect x="${x}" y="0" width="2" height="410" fill="${P.accent}" opacity=".18"/>`;
-      g += `<rect y="400" width="960" height="140" fill="${P.floor}"/>`;
-      for (let y = 428; y < 540; y += 30) g += `<rect y="${y}" width="960" height="2" fill="#000" opacity=".12"/>`;
-      g += `<rect width="960" height="26" fill="${P.wood}"/>`;
-      if (fam !== 'toekomst') [150, 470, 790].forEach((x) => { g += `<rect x="${x}" y="26" width="16" height="16" fill="${P.wood}"/>`; });
-      if (k === 'herberg') g += this.window(fam, part, 600, 96, 120, 150, P) + this.lamp(fam, 300, P) + this.lamp(fam, 690, P);
-      else g += this.window(fam, part, 396, 82, 120, 140, P) + this.lamp(fam, 640, P);
-      if (k === 'herberg') {   // set dressing that is not a hotspot: shelves, bottles, barrel
+      // wall with subtle vertical gradient + wainscoting + architectural molding
+      g += `<rect width="960" height="406" fill="url(#${idP}_wall)"/>`;
+      if (fam === 'oud') {
+        for (let y = 52; y < 292; y += 34) { g += `<line x1="0" y1="${y}" x2="960" y2="${y}" stroke="${P.ink}" stroke-width="1" opacity=".1"/>`;
+          for (let x = (y % 68 ? 0 : 40); x < 960; x += 80) g += `<line x1="${x}" y1="${y}" x2="${x}" y2="${y + 34}" stroke="${P.ink}" stroke-width="1" opacity=".08"/>`; }
+      }
+      if (fam === 'klassiek') for (let x = 24; x < 960; x += 48) g += `<rect x="${x}" y="26" width="16" height="268" fill="#000" opacity=".05"/>`;
+      if (fam === 'modern') for (let x = 40; x < 960; x += 120) g += `<line x1="${x}" y1="26" x2="${x}" y2="294" stroke="${P.ink}" stroke-width="1" opacity=".08"/>`;
+      if (fam === 'toekomst') {
+        for (let x = 0; x < 960; x += 120) g += `<rect x="${x}" y="26" width="2" height="378" fill="${P.accent}" opacity=".16"/>`;
+        g += `<line x1="0" y1="68" x2="960" y2="68" stroke="${P.accent}" stroke-width="1" opacity=".18"/>`;
+      }
+      // wainscoting dado + recessed panels
+      g += `<rect y="296" width="960" height="108" fill="${Hex.mix(P.wood2, wall, 0.22)}"/><rect y="290" width="960" height="8" fill="${P.trim}" opacity=".75"/>`;
+      for (let x = 18; x < 940; x += 116) g += `<rect x="${x}" y="308" width="96" height="78" rx="2" fill="none" stroke="${P.ink}" stroke-width="1.4" opacity=".16"/>`;
+      // baseboard shadow + perspective floor
+      g += `<rect y="400" width="960" height="140" fill="url(#${idP}_floor)"/><rect y="398" width="960" height="6" fill="${P.ink}" opacity=".28"/>`;
+      for (let y = 426; y < 540; y += 28) g += `<line x1="0" y1="${y}" x2="960" y2="${y}" stroke="#000" stroke-width="1.4" opacity=".13"/>`;
+      for (let i = -5; i <= 5; i++) g += `<line x1="${480 + i * 78}" y1="400" x2="${480 + i * 142}" y2="540" stroke="#000" stroke-width="1.2" opacity=".11"/>`;
+      // ceiling cornice & beams
+      g += `<rect width="960" height="26" fill="${P.wood}"/><rect y="26" width="960" height="5" fill="#000" opacity=".18"/>`;
+      if (fam !== 'toekomst') [150, 470, 790].forEach((x) => { g += `<rect x="${x}" y="26" width="18" height="18" fill="${P.wood}"/><rect x="${x - 3}" y="42" width="24" height="5" fill="${P.wood2}"/>`; });
+      // template-specific interior set dressing (non-hotspot architectural depth)
+      if (k === 'herberg') {
+        g += `<rect x="768" y="26" width="180" height="176" fill="${Hex.mix(P.stone, wall, 0.35)}" opacity=".65"/>`; // chimney breast above hearth
         g += `<rect x="40" y="150" width="360" height="9" fill="${P.wood2}"/><rect x="40" y="214" width="360" height="9" fill="${P.wood2}"/>`;
         for (let i = 0; i < 9; i++) { const x = 52 + i * 38, tall = i % 3 !== 1;
           g += tall ? `<rect x="${x}" y="112" width="13" height="38" rx="3" fill="${['#3f5e3a', '#6b2d2a', '#4b3a24'][i % 3]}"/><rect x="${x + 4}" y="102" width="5" height="12" fill="${['#3f5e3a', '#6b2d2a', '#4b3a24'][i % 3]}"/>`
             : `<rect x="${x - 2}" y="128" width="18" height="22" rx="3" fill="${P.trim}"/>`;
           g += `<rect x="${x + 2}" y="${190}" width="16" height="24" rx="3" fill="${i % 2 ? P.trim : '#8a6a44'}"/>`; }
-        g += `<ellipse cx="438" cy="396" rx="26" ry="36" fill="${P.wood2}"/><rect x="412" y="380" width="52" height="5" fill="${P.ink}" opacity=".6"/><rect x="412" y="406" width="52" height="5" fill="${P.ink}" opacity=".6"/>`;
+        g += `<ellipse cx="438" cy="396" rx="26" ry="36" fill="${P.wood2}" stroke="${P.ink}" stroke-width="1.2" stroke-opacity=".35"/><rect x="412" y="380" width="52" height="5" fill="${P.ink}" opacity=".55"/><rect x="412" y="406" width="52" height="5" fill="${P.ink}" opacity=".55"/>`;
+        g += `<rect x="462" y="88" width="104" height="72" rx="2" fill="${P.trim}" stroke="${P.wood}" stroke-width="5" opacity=".78"/><path d="M474 134 Q504 108 552 128" fill="none" stroke="${P.ink}" stroke-width="1.4" opacity=".4"/>`;
+      } else if (tpl === 'kantoor' || tpl === 'archief') {
+        // wall clock whose hands match the time of day + framed plan/niches
+        const ang = [[-60, 0], [60, 0], [-120, 0]][part];
+        g += `<g transform="translate(820 112)"><circle r="28" fill="${P.trim}" stroke="${P.wood}" stroke-width="5"/><circle r="22" fill="#f5ecd9" opacity=".92"/><line x1="0" y1="0" x2="${(Math.cos((ang[0] - 90) * Math.PI / 180) * 12).toFixed(1)}" y2="${(Math.sin((ang[0] - 90) * Math.PI / 180) * 12).toFixed(1)}" stroke="${P.ink}" stroke-width="2.2" stroke-linecap="round"/><line x1="0" y1="0" x2="0" y2="-16" stroke="${P.ink}" stroke-width="1.5" stroke-linecap="round"/><circle r="2.2" fill="${P.ink}"/></g>`;
+        if (tpl === 'archief') {
+          g += `<path d="M580 288 L580 120 A60 44 0 0 1 700 120 L700 288 Z" fill="${P.wood}" opacity=".26"/>`;
+          for (let y = 146; y < 276; y += 34) g += `<line x1="588" y1="${y}" x2="692" y2="${y}" stroke="${P.wood}" stroke-width="4" opacity=".45"/>`;
+        } else {
+          g += `<rect x="116" y="76" width="136" height="92" rx="2" fill="#efe6d1" stroke="${P.wood}" stroke-width="5" opacity=".82"/><path d="M132 104 L236 104 M132 124 L218 124 M132 144 L228 144" stroke="${P.ink}" stroke-width="1.5" opacity=".32"/>`;
+        }
+      } else if (tpl === 'huis') {
+        g += `<rect x="136" y="78" width="96" height="112" rx="2" fill="${Hex.mix(P.trim, wall, 0.3)}" stroke="${P.wood}" stroke-width="6" opacity=".84"/><path d="M148 164 Q184 128 220 158" fill="none" stroke="${P.ink}" stroke-width="1.6" opacity=".35"/>`;
+        g += `<polygon points="220,432 740,432 796,512 164,512" fill="${P.accent}" opacity=".22"/><polygon points="242,442 718,442 764,502 196,502" fill="none" stroke="${P.trim}" stroke-width="2" opacity=".35"/>`;
+      } else if (tpl === 'werkplaats') {
+        g += `<rect x="610" y="92" width="140" height="92" rx="3" fill="${P.wood}" opacity=".35"/>`;
+        for (let i = 0; i < 5; i++) g += `<rect x="${626 + i * 24}" y="108" width="6" height="52" rx="2" fill="${P.ink}" opacity=".32"/>`;
+        g += `<path d="M0 110 L140 26 M960 110 L820 26" stroke="${P.wood}" stroke-width="10" opacity=".45"/>`;
+      }
+      // windows & ceiling lamps
+      if (k === 'herberg') g += this.window(fam, part, 600, 96, 120, 150, P, idP) + this.lamp(fam, 300, P, part) + this.lamp(fam, 690, P, part);
+      else g += this.window(fam, part, 396, 82, 120, 140, P, idP) + this.lamp(fam, 640, P, part);
+      // angled daylight sunbeams (morning warm low shaft, midday crisp cone)
+      if (part < 2) {
+        const wx = k === 'herberg' ? 600 : 396, wy = k === 'herberg' ? 96 : 82, dx = part === 0 ? -170 : -65;
+        g += `<polygon points="${wx},${wy} ${wx + 120},${wy} ${wx + 120 + dx},495 ${wx + dx},495" fill="url(#${idP}_sun)" pointer-events="none"/>`;
       }
       return g;
     }
-    // outside: sky, skyline by family, ground by template
-    g += this.sky(part, fam, 0, 0, 960, 330);
-    const sk = RNG.make('skyline|' + M.loc.id + '|' + M.loc.name); let x = -10;
-    while (x < 960) { const w = 70 + sk.int(70), hgt = 90 + sk.int(110), y = 330 - hgt, c = Hex.mix(P.stone, ['#d7e6e4', '#9cc6d6', '#24324a'][part], 0.35);
-      if (fam === 'oud' || fam === 'klassiek') g += `<path d="M${x} 330 L${x} ${y} L${x + w / 2} ${y - 34} L${x + w} ${y} L${x + w} 330 Z" fill="${c}"/>`;
-      else if (fam === 'modern') g += `<rect x="${x}" y="${y}" width="${w}" height="${hgt}" fill="${c}"/>`;
-      else g += `<rect x="${x + 10}" y="${y - 60}" width="${w - 20}" height="${hgt + 60}" rx="6" fill="${c}"/>`;
-      for (let wy = y + 14; wy < 316; wy += 26) for (let wx = x + 12; wx < x + w - 16; wx += 22) g += `<rect x="${wx}" y="${wy}" width="9" height="12" fill="${part === 2 ? (fam === 'toekomst' ? P.accent : '#f4d98a') : '#000'}" opacity="${part === 2 ? 0.7 : 0.12}"/>`;
+    // outside: atmospheric sky, two-layer skyline by era family, textured ground & template details
+    g += this.sky(part, fam, 0, 0, 960, 330, idP);
+    const sk = RNG.make('skyline|' + M.loc.id + '|' + M.loc.name);
+    // distant hazy background layer (spires, domes, towers) for depth
+    const farCol = Hex.mix(P.stone, fam === 'toekomst' ? '#18374a' : ['#dce4e0', '#b4d0dc', '#182438'][part], 0.58);
+    let fx = -20;
+    while (fx < 960) {
+      const fw = 64 + sk.int(66), fh = 125 + sk.int(95), fy = 330 - fh;
+      if (fam === 'oud' && sk.int(3) === 0) g += `<path d="M${fx} 330 L${fx} ${fy + 30} L${fx + fw / 2} ${fy - 44} L${fx + fw} ${fy + 30} L${fx + fw} 330 Z" fill="${farCol}" opacity=".75"/>`;
+      else if (fam === 'toekomst') g += `<rect x="${fx + 6}" y="${fy - 36}" width="${fw - 12}" height="${fh + 36}" rx="4" fill="${farCol}" opacity=".7"/>`;
+      else g += `<rect x="${fx}" y="${fy}" width="${fw}" height="${fh}" fill="${farCol}" opacity=".68"/>`;
+      fx += fw + 10;
+    }
+    // mid-ground era facades
+    let x = -10;
+    while (x < 960) { const w = 70 + sk.int(70), hgt = 90 + sk.int(108), y = 330 - hgt, c = Hex.mix(P.stone, fam === 'toekomst' ? '#17293c' : ['#d7e6e4', '#9cc6d6', '#24324a'][part], 0.34);
+      if (fam === 'oud') {
+        g += `<path d="M${x} 330 L${x} ${y} L${x + w * 0.25} ${y} L${x + w * 0.25} ${y - 16} L${x + w * 0.5} ${y - 34} L${x + w * 0.75} ${y - 16} L${x + w * 0.75} ${y} L${x + w} ${y} L${x + w} 330 Z" fill="${c}" stroke="${P.ink}" stroke-width="1" stroke-opacity=".18"/>`;
+      } else if (fam === 'klassiek') {
+        g += `<path d="M${x} 330 L${x} ${y} L${x + 12} ${y - 24} L${x + w - 12} ${y - 24} L${x + w} ${y} L${x + w} 330 Z" fill="${c}" stroke="${P.ink}" stroke-width="1" stroke-opacity=".18"/>`;
+        g += `<rect x="${x + w * 0.7}" y="${y - 38}" width="10" height="16" fill="${c}"/>`;
+      } else if (fam === 'modern') {
+        g += `<rect x="${x}" y="${y}" width="${w}" height="${hgt}" fill="${c}" stroke="${P.ink}" stroke-width="1" stroke-opacity=".16"/><rect x="${x + 8}" y="${y - 10}" width="${w - 16}" height="10" fill="${Hex.mix(c, '#000', 0.12)}"/>`;
+      } else {
+        g += `<rect x="${x + 10}" y="${y - 54}" width="${w - 20}" height="${hgt + 54}" rx="6" fill="${c}" stroke="${P.accent}" stroke-width="1" stroke-opacity=".28"/>`;
+        if (x > 60 && sk.int(2) === 0) g += `<line x1="${x - 14}" y1="${y + 20}" x2="${x + 12}" y2="${y + 20}" stroke="${P.accent}" stroke-width="3" opacity=".32"/>`;
+      }
+      for (let wy = y + 14; wy < 316; wy += 26) for (let wx = x + 12; wx < x + w - 16; wx += 22) {
+        const lit = part >= 2 && ((wx + wy) % 3 !== 0);
+        g += `<rect x="${wx}" y="${wy}" width="9" height="12" fill="${lit ? (fam === 'toekomst' ? P.accent : '#f6dc8b') : '#000'}" opacity="${lit ? 0.78 : 0.12}"/>`;
+      }
       x += w + 6; }
-    const ground = tpl === 'park' ? '#7f9f5c' : tpl === 'haven' ? Hex.mix(P.stone, '#000', 0.1) : Hex.mix(P.stone, '#fff', 0.15);
-    g += `<rect y="330" width="960" height="210" fill="${ground}"/>`;
-    if (tpl === 'haven') g += `<rect y="340" width="960" height="70" fill="#5f97a8"/><path d="M0 360 q20 -6 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0" fill="none" stroke="#cfe5ea" stroke-width="2" opacity=".6"/><path d="M640 352 L760 352 L740 372 L660 372 Z" fill="${P.wood}"/><path d="M700 352 L700 300 L730 346 Z" fill="${P.trim}"/><rect y="408" width="960" height="8" fill="${P.wood}"/>`;
-    if (tpl === 'park') for (let i = 0; i < 6; i++) g += `<circle cx="${80 + i * 170}" cy="${300 - (i % 2) * 20}" r="${44 + (i % 3) * 8}" fill="#4f7a3e"/>`;
-    if (tpl === 'markt') { g += `<path d="M0 120 Q240 170 480 120 Q720 170 960 120" fill="none" stroke="${P.ink}" stroke-width="2"/>`; for (let i = 0; i < 16; i++) g += `<path d="M${30 + i * 60} ${126 + Math.sin(i) * 8} l12 26 l12 -26 Z" fill="${['#b9442f', '#e0b34a', '#2f6f8f'][i % 3]}"/>`; }
-    if (tpl === 'poort') g += `<path d="M330 330 L330 150 L630 150 L630 330 L560 330 L560 240 A80 80 0 0 0 400 240 L400 330 Z" fill="${Hex.mix(P.stone, '#000', 0.15)}"/>`;
-    if (tpl !== 'park' && tpl !== 'haven') for (let y = 360; y < 540; y += 28) g += `<rect y="${y}" width="960" height="2" fill="#000" opacity=".1"/>`;
+    // ground plane with subtle depth gradient
+    const ground = tpl === 'park' ? '#7b9b59' : tpl === 'haven' ? Hex.mix(P.stone, '#000', 0.1) : Hex.mix(P.stone, '#fff', 0.14);
+    g += `<rect y="330" width="960" height="210" fill="${ground}"/><rect y="330" width="960" height="14" fill="#000" opacity=".14"/>`;
+    if (tpl === 'haven') {
+      const wCol = part >= 2 ? '#29495c' : part === 0 ? '#5d8fa0' : '#4f889c';
+      g += `<rect y="336" width="960" height="76" fill="${wCol}"/>`;
+      g += `<path d="M0 358 q20 -5 40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0 t40 0" fill="none" stroke="#dceef2" stroke-width="1.8" opacity=".48"/>`;
+      g += `<path d="M16 382 q24 -4 48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0 t48 0" fill="none" stroke="#dceef2" stroke-width="1.4" opacity=".32"/>`;
+      g += `<path d="M640 352 L764 352 L742 374 L662 374 Z" fill="${P.wood}" stroke="${P.ink}" stroke-width="1.2" stroke-opacity=".4"/><path d="M702 352 L702 292 L736 346 Z" fill="${P.trim}" opacity=".9"/>`;
+      if (part >= 2) g += `<ellipse cx="702" cy="388" rx="34" ry="8" fill="#ffd978" opacity=".26"/><ellipse cx="220" cy="378" rx="42" ry="7" fill="${fam === 'toekomst' ? P.accent : '#ffd978'}" opacity=".22"/>`;
+      g += `<rect y="408" width="960" height="10" fill="${P.wood}"/>`;
+      [88, 290, 510, 790].forEach((px) => { g += `<rect x="${px}" y="396" width="12" height="24" rx="2" fill="${P.wood2}" stroke="${P.ink}" stroke-width="1" stroke-opacity=".4"/>`; });
+    }
+    if (tpl === 'park') {
+      g += `<polygon points="360,330 600,330 760,540 200,540" fill="#d5c69c" opacity=".42"/>`;
+      for (let i = 0; i < 6; i++) g += `<circle cx="${80 + i * 170}" cy="${300 - (i % 2) * 20}" r="${44 + (i % 3) * 8}" fill="#4a753a"/><circle cx="${96 + i * 170}" cy="${292 - (i % 2) * 20}" r="${28 + (i % 2) * 6}" fill="#5c8a48" opacity=".6"/>`;
+      g += `<path d="M0 334 L960 334" stroke="${P.ink}" stroke-width="2" opacity=".35"/>`;
+      for (let rx = 20; rx < 960; rx += 26) g += `<line x1="${rx}" y1="318" x2="${rx}" y2="334" stroke="${P.ink}" stroke-width="1.4" opacity=".3"/>`;
+    }
+    if (tpl === 'markt') {
+      g += `<path d="M0 118 Q240 168 480 118 Q720 168 960 118" fill="none" stroke="${P.ink}" stroke-width="2"/>`;
+      for (let i = 0; i < 16; i++) g += `<path d="M${30 + i * 60} ${124 + Math.sin(i) * 8} l12 26 l12 -26 Z" fill="${['#b9442f', '#e0b34a', '#2f6f8f'][i % 3]}"/>`;
+    }
+    if (tpl === 'poort') {
+      g += `<path d="M320 330 L320 144 L640 144 L640 330 L562 330 L562 240 A82 82 0 0 0 398 240 L398 330 Z" fill="${Hex.mix(P.stone, '#000', 0.14)}" stroke="${P.ink}" stroke-width="1.4" stroke-opacity=".35"/>`;
+      for (let bx = 326; bx < 630; bx += 38) g += `<rect x="${bx}" y="130" width="22" height="16" fill="${Hex.mix(P.stone, '#000', 0.18)}"/>`;
+      for (let gx = 418; gx <= 542; gx += 24) g += `<line x1="${gx}" y1="162" x2="${gx}" y2="218" stroke="${P.ink}" stroke-width="3" opacity=".5"/>`;
+    }
+    if (tpl !== 'park' && tpl !== 'haven') {
+      for (let y = 358; y < 540; y += 26) g += `<line x1="0" y1="${y}" x2="960" y2="${y}" stroke="#000" stroke-width="1.4" opacity=".1"/>`;
+      for (let i = -4; i <= 4; i++) g += `<line x1="${480 + i * 95}" y1="330" x2="${480 + i * 165}" y2="540" stroke="#000" stroke-width="1.2" opacity=".08"/>`;
+    }
+    // subtle outdoor street lamps in the background (glow in evening)
+    [156, 804].forEach((lx) => {
+      g += `<g pointer-events="none"><rect x="${lx - 2.5}" y="256" width="5" height="78" fill="${P.ink}" opacity=".68"/><rect x="${lx - 8}" y="242" width="16" height="16" rx="2" fill="${part >= 2 ? (fam === 'toekomst' ? P.accent : '#ffe082') : '#d7dde0'}" stroke="${P.ink}" stroke-width="1.4" opacity=".88"/></g>`;
+    });
     return g;
   },
   drawProp(kind, b, P, fam) {
     const x = b.x, y = b.y, w = b.w, h = b.h, W = P.wood, W2 = P.wood2, S = P.stone, T = P.trim, ink = P.ink;
+    const sh = kind === 'ledger' && h < 50 ? '' : `<ellipse cx="${x + w / 2}" cy="${y + h - 2}" rx="${(w * 0.48).toFixed(1)}" ry="7" fill="#0d131a" opacity=".2"/>`;
+    const ol = `stroke="${ink}" stroke-width="1.2" stroke-opacity=".34"`;
+    let body = '';
     switch (kind) {
-      case 'counter': return `<rect x="${x - 10}" y="${y}" width="${w + 20}" height="16" fill="${W2}"/><rect x="${x}" y="${y + 16}" width="${w}" height="${h - 16}" fill="${W}"/>` +
+      case 'counter': body = `<rect x="${x - 10}" y="${y}" width="${w + 20}" height="16" fill="${W2}" ${ol}/><rect x="${x}" y="${y + 16}" width="${w}" height="${h - 16}" fill="${W}" ${ol}/>` +
         [0, 1, 2, 3].map((i) => `<rect x="${x + 14 + i * w / 4}" y="${y + 34}" width="${w / 4 - 28}" height="${h - 64}" fill="none" stroke="${W2}" stroke-width="4"/>`).join('') +
-        [0, 1, 2].map((i) => `<rect x="${x + 110 + i * 34}" y="${y - 30}" width="8" height="30" rx="3" fill="${T}"/><circle cx="${x + 114 + i * 34}" cy="${y - 32}" r="6" fill="${P.accent}"/>`).join('');
-      case 'table': return `<rect x="${x}" y="${y}" width="${w}" height="16" rx="3" fill="${W2}"/><rect x="${x + 14}" y="${y + 16}" width="12" height="${h - 16}" fill="${W}"/><rect x="${x + w - 26}" y="${y + 16}" width="12" height="${h - 16}" fill="${W}"/>` +
-        `<rect x="${x + 70}" y="${y - 34}" width="14" height="34" rx="4" fill="#6b2d2a"/><rect x="${x + 74}" y="${y - 46}" width="6" height="14" fill="#6b2d2a"/><path d="M${x + 110} ${y - 20} l14 0 l-3 12 l-8 0 Z M${x + 132} ${y - 20} l14 0 l-3 12 l-8 0 Z" fill="#f2e6c6"/><rect x="${x + 116}" y="${y - 8}" width="2" height="8" fill="#f2e6c6"/><rect x="${x + 138}" y="${y - 8}" width="2" height="8" fill="#f2e6c6"/>`;
-      case 'hearth': return `<rect x="${x - 10}" y="${y}" width="${w + 20}" height="18" fill="${W2}"/><rect x="${x}" y="${y + 18}" width="${w}" height="${h - 18}" fill="${S}"/>` +
+        [0, 1, 2].map((i) => `<rect x="${x + 110 + i * 34}" y="${y - 30}" width="8" height="30" rx="3" fill="${T}"/><circle cx="${x + 114 + i * 34}" cy="${y - 32}" r="6" fill="${P.accent}"/>`).join(''); break;
+      case 'table': body = `<rect x="${x}" y="${y}" width="${w}" height="16" rx="3" fill="${W2}" ${ol}/><rect x="${x + 14}" y="${y + 16}" width="12" height="${h - 16}" fill="${W}"/><rect x="${x + w - 26}" y="${y + 16}" width="12" height="${h - 16}" fill="${W}"/>` +
+        `<rect x="${x + 70}" y="${y - 34}" width="14" height="34" rx="4" fill="#6b2d2a"/><rect x="${x + 74}" y="${y - 46}" width="6" height="14" fill="#6b2d2a"/><path d="M${x + 110} ${y - 20} l14 0 l-3 12 l-8 0 Z M${x + 132} ${y - 20} l14 0 l-3 12 l-8 0 Z" fill="#f2e6c6"/><rect x="${x + 116}" y="${y - 8}" width="2" height="8" fill="#f2e6c6"/><rect x="${x + 138}" y="${y - 8}" width="2" height="8" fill="#f2e6c6"/>`; break;
+      case 'hearth': body = `<rect x="${x - 10}" y="${y}" width="${w + 20}" height="18" fill="${W2}" ${ol}/><rect x="${x}" y="${y + 18}" width="${w}" height="${h - 18}" fill="${S}" ${ol}/>` +
         `<path d="M${x + 26} ${y + h} L${x + 26} ${y + h * 0.42} Q${x + w / 2} ${y + h * 0.22} ${x + w - 26} ${y + h * 0.42} L${x + w - 26} ${y + h} Z" fill="#1d1712"/>` +
         (fam === 'toekomst' ? `<rect x="${x + 36}" y="${y + h * 0.55}" width="${w - 72}" height="10" rx="5" fill="${P.accent}"/><rect x="${x + 36}" y="${y + h * 0.7}" width="${w - 72}" height="10" rx="5" fill="${P.accent}" opacity=".6"/>`
-          : `<path d="M${x + w / 2 - 30} ${y + h - 6} q10 -50 22 -30 q6 -34 18 -6 q12 -26 14 4 q10 -18 6 32 Z" fill="#e8892c"/><path d="M${x + w / 2 - 14} ${y + h - 6} q6 -28 14 -16 q8 -16 12 16 Z" fill="#f7d36b"/>`);
-      case 'door': return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W}"/>` + [1, 2, 3].map((i) => `<rect x="${x + i * w / 4 - 1}" y="${y + 6}" width="2" height="${h - 12}" fill="#000" opacity=".25"/>`).join('') +
-        `<rect x="${x + 8}" y="${y + h * 0.3}" width="${w - 16}" height="7" fill="${ink}" opacity=".5"/><rect x="${x + 8}" y="${y + h * 0.7}" width="${w - 16}" height="7" fill="${ink}" opacity=".5"/><circle cx="${x + w - 16}" cy="${y + h / 2}" r="5" fill="${T}"/>`;
-      case 'ledger': return `<rect x="${x + w * 0.15}" y="${y + h * 0.35}" width="${w * 0.7}" height="${h * 0.3}" rx="2" fill="#efe3c1" stroke="${ink}" stroke-width="2"/><path d="M${x + w / 2} ${y + h * 0.35} L${x + w / 2} ${y + h * 0.65}" stroke="${ink}" stroke-width="2"/>` +
-        (h > 60 ? `<rect x="${x + w * 0.1}" y="${y + h * 0.65}" width="${w * 0.8}" height="10" fill="${W2}"/><rect x="${x + w * 0.45}" y="${y + h * 0.65 + 10}" width="${w * 0.1}" height="${h * 0.35 - 10}" fill="${W}"/>` : '');
-      case 'desk': return `<rect x="${x}" y="${y + h * 0.45}" width="${w}" height="14" fill="${W2}"/><rect x="${x + 8}" y="${y + h * 0.45 + 14}" width="${w * 0.36}" height="${h * 0.55 - 14}" fill="${W}"/>` +
+          : `<path d="M${x + w / 2 - 30} ${y + h - 6} q10 -50 22 -30 q6 -34 18 -6 q12 -26 14 4 q10 -18 6 32 Z" fill="#e8892c"/><path d="M${x + w / 2 - 14} ${y + h - 6} q6 -28 14 -16 q8 -16 12 16 Z" fill="#f7d36b"/>`); break;
+      case 'door': body = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W}" ${ol}/>` + [1, 2, 3].map((i) => `<rect x="${x + i * w / 4 - 1}" y="${y + 6}" width="2" height="${h - 12}" fill="#000" opacity=".25"/>`).join('') +
+        `<rect x="${x + 8}" y="${y + h * 0.3}" width="${w - 16}" height="7" fill="${ink}" opacity=".5"/><rect x="${x + 8}" y="${y + h * 0.7}" width="${w - 16}" height="7" fill="${ink}" opacity=".5"/><circle cx="${x + w - 16}" cy="${y + h / 2}" r="5" fill="${T}"/>`; break;
+      case 'ledger': body = `<rect x="${x + w * 0.15}" y="${y + h * 0.35}" width="${w * 0.7}" height="${h * 0.3}" rx="2" fill="#efe3c1" stroke="${ink}" stroke-width="2"/><path d="M${x + w / 2} ${y + h * 0.35} L${x + w / 2} ${y + h * 0.65}" stroke="${ink}" stroke-width="2"/>` +
+        (h > 60 ? `<rect x="${x + w * 0.1}" y="${y + h * 0.65}" width="${w * 0.8}" height="10" fill="${W2}"/><rect x="${x + w * 0.45}" y="${y + h * 0.65 + 10}" width="${w * 0.1}" height="${h * 0.35 - 10}" fill="${W}"/>` : ''); break;
+      case 'desk': body = `<rect x="${x}" y="${y + h * 0.45}" width="${w}" height="14" fill="${W2}" ${ol}/><rect x="${x + 8}" y="${y + h * 0.45 + 14}" width="${w * 0.36}" height="${h * 0.55 - 14}" fill="${W}" ${ol}/>` +
         [0, 1, 2].map((i) => `<rect x="${x + 16}" y="${y + h * 0.45 + 22 + i * (h * 0.55 - 20) / 3}" width="${w * 0.36 - 16}" height="4" fill="#000" opacity=".25"/>`).join('') +
         `<rect x="${x + w - 18}" y="${y + h * 0.45 + 14}" width="10" height="${h * 0.55 - 14}" fill="${W}"/><rect x="${x + w * 0.55}" y="${y + h * 0.45 - 10}" width="${w * 0.25}" height="10" fill="#efe3c1" stroke="${ink}" stroke-width="1.5"/>` +
-        (fam === 'modern' || fam === 'toekomst' ? `<rect x="${x + w * 0.12}" y="${y + h * 0.45 - 40}" width="44" height="34" rx="3" fill="${fam === 'toekomst' ? P.accent : '#d9d2c0'}" stroke="${ink}" stroke-width="2"/>` : `<rect x="${x + w * 0.16}" y="${y + h * 0.45 - 24}" width="12" height="24" fill="${T}"/>`);
-      case 'cabinet': case 'rack': return `<rect x="${x + w * 0.1}" y="${y}" width="${w * 0.8}" height="${h}" fill="${W}"/>` +
+        (fam === 'modern' || fam === 'toekomst' ? `<rect x="${x + w * 0.12}" y="${y + h * 0.45 - 40}" width="44" height="34" rx="3" fill="${fam === 'toekomst' ? P.accent : '#d9d2c0'}" stroke="${ink}" stroke-width="2"/>` : `<rect x="${x + w * 0.16}" y="${y + h * 0.45 - 24}" width="12" height="24" fill="${T}"/>`); break;
+      case 'cabinet': case 'rack': body = `<rect x="${x + w * 0.1}" y="${y}" width="${w * 0.8}" height="${h}" fill="${W}" ${ol}/>` +
         [1, 2, 3].map((i) => `<rect x="${x + w * 0.1}" y="${y + i * h / 4 - 3}" width="${w * 0.8}" height="6" fill="${W2}"/>`).join('') +
         (kind === 'rack' ? [0, 1, 2, 3].map((i) => `<path d="M${x + w * 0.2 + i * w * 0.17} ${y + 12} l0 ${h / 4 - 18}" stroke="${S}" stroke-width="5"/>`).join('')
-          : [0, 1, 2].map((r) => [0, 1, 2, 3, 4].map((i) => `<rect x="${x + w * 0.16 + i * w * 0.13}" y="${y + r * h / 4 + 10}" width="${w * 0.09}" height="${h / 4 - 16}" fill="${['#8a3b2e', '#3f5e3a', '#5b4a7a', '#a3763a', '#2f5f80'][(i + r) % 5]}"/>`).join('')).join(''));
-      case 'stand': return `<rect x="${x + w * 0.3}" y="${y + h * 0.5}" width="${w * 0.4}" height="${h * 0.5}" fill="${W}"/><rect x="${x + w * 0.27}" y="${y + h * 0.5 - 8}" width="${w * 0.46}" height="10" fill="${W2}"/><rect x="${x + w * 0.36}" y="${y + h * 0.62}" width="${w * 0.28}" height="5" fill="#000" opacity=".25"/><rect x="${x + w * 0.42}" y="${y + h * 0.5 - 40}" width="14" height="32" fill="${T}"/><path d="M${x + w * 0.42 - 8} ${y + h * 0.5 - 40} l15 -18 l15 18 Z" fill="#f4d98a"/>`;
-      case 'crate': return `<rect x="${x + w * 0.15}" y="${y + h * 0.35}" width="${w * 0.7}" height="${h * 0.65}" fill="${W2}" stroke="${W}" stroke-width="5"/><path d="M${x + w * 0.15} ${y + h * 0.35} L${x + w * 0.85} ${y + h}" stroke="${W}" stroke-width="5"/>`;
-      case 'stall': return `<rect x="${x}" y="${y + h * 0.5}" width="${w}" height="${h * 0.5}" fill="${W2}"/><path d="M${x - 8} ${y + h * 0.3} L${x + w + 8} ${y + h * 0.3} L${x + w} ${y} L${x} ${y} Z" fill="${P.accent}"/>` +
-        [0, 1, 2, 3].map((i) => `<rect x="${x + i * w / 4}" y="${y}" width="${w / 8}" height="${h * 0.3}" fill="#f2ead4" opacity=".7"/>`).join('') + `<rect x="${x + 4}" y="${y + h * 0.3}" width="6" height="${h * 0.2}" fill="${W}"/><rect x="${x + w - 10}" y="${y + h * 0.3}" width="6" height="${h * 0.2}" fill="${W}"/>`;
-      case 'pump': return `<rect x="${x + w / 2 - 12}" y="${y + 20}" width="24" height="${h - 20}" fill="${S}"/><rect x="${x + w / 2 - 18}" y="${y + 10}" width="36" height="14" rx="6" fill="${ink}" opacity=".7"/><path d="M${x + w / 2 + 12} ${y + 60} l26 0 l0 10" stroke="${S}" stroke-width="8" fill="none"/><path d="M${x + w / 2 - 12} ${y + 40} l-30 -20" stroke="${ink}" stroke-width="5"/>`;
-      case 'board': return `<rect x="${x + 10}" y="${y + 10}" width="${w - 20}" height="${h * 0.55}" fill="${W2}" stroke="${W}" stroke-width="6"/>` + [0, 1, 2].map((i) => `<rect x="${x + 22 + i * (w - 44) / 3}" y="${y + 22 + (i % 2) * 10}" width="${(w - 60) / 3}" height="${h * 0.3}" fill="#f2ead4" transform="rotate(${i - 1} ${x + w / 2} ${y + h / 3})"/>`).join('') +
-        `<rect x="${x + 22}" y="${y + 10 + h * 0.55}" width="8" height="${h * 0.45 - 10}" fill="${W}"/><rect x="${x + w - 30}" y="${y + 10 + h * 0.55}" width="8" height="${h * 0.45 - 10}" fill="${W}"/>`;
-      case 'bench': return `<rect x="${x}" y="${y + h * 0.45}" width="${w}" height="12" fill="${W2}"/><rect x="${x}" y="${y + h * 0.2}" width="${w}" height="10" fill="${W2}"/><rect x="${x + 10}" y="${y + h * 0.2}" width="8" height="${h * 0.8}" fill="${W}"/><rect x="${x + w - 18}" y="${y + h * 0.2}" width="8" height="${h * 0.8}" fill="${W}"/>`;
-      case 'tree': return `<rect x="${x + w / 2 - 12}" y="${y + h * 0.4}" width="24" height="${h * 0.6}" fill="${W}"/><circle cx="${x + w / 2}" cy="${y + h * 0.3}" r="${w * 0.38}" fill="#4f7a3e"/><circle cx="${x + w / 2 - w * 0.22}" cy="${y + h * 0.42}" r="${w * 0.22}" fill="#5c8a47"/>`;
-      case 'steps': return [0, 1, 2, 3].map((i) => `<rect x="${x + i * 10}" y="${y + h - (i + 1) * h / 4}" width="${w - i * 20}" height="${h / 4}" fill="${Hex.mix(S, '#fff', i * 0.08)}" stroke="${ink}" stroke-width="1.5" stroke-opacity=".4"/>`).join('');
-      case 'scale': return `<rect x="${x + w / 2 - 4}" y="${y + 20}" width="8" height="${h - 20}" fill="${ink}"/><path d="M${x + 20} ${y + 30} L${x + w - 20} ${y + 30}" stroke="${ink}" stroke-width="4"/><path d="M${x + 6} ${y + 60} L${x + 20} ${y + 30} L${x + 34} ${y + 60} Z M${x + w - 34} ${y + 60} L${x + w - 20} ${y + 30} L${x + w - 6} ${y + 60} Z" fill="${T}"/>`;
-      case 'bollard': return `<rect x="${x + w / 2 - 16}" y="${y + h * 0.3}" width="32" height="${h * 0.7}" rx="6" fill="${ink}" opacity=".85"/><rect x="${x + w / 2 - 22}" y="${y + h * 0.3}" width="44" height="12" rx="5" fill="${ink}"/><path d="M${x + w / 2} ${y + h * 0.4} q-60 10 -80 50" stroke="${T}" stroke-width="4" fill="none"/>`;
-      case 'nets': return `<path d="M${x} ${y + h} Q${x + w / 2} ${y} ${x + w} ${y + h} Z" fill="#7a6a4a"/>` + [1, 2, 3, 4].map((i) => `<path d="M${x + i * w / 5} ${y + h} Q${x + w / 2} ${y + h * 0.2} ${x + w - i * w / 5} ${y + h}" stroke="#c9b98a" stroke-width="1.5" fill="none"/>`).join('');
-      case 'hut': return `<rect x="${x + 10}" y="${y + h * 0.3}" width="${w - 20}" height="${h * 0.7}" fill="${W2}"/><path d="M${x} ${y + h * 0.32} L${x + w / 2} ${y} L${x + w} ${y + h * 0.32} Z" fill="${W}"/><rect x="${x + w * 0.3}" y="${y + h * 0.45}" width="${w * 0.4}" height="${h * 0.25}" fill="${part2(fam)}"/>`;
-      case 'lamp': return `<rect x="${x + w / 2 - 4}" y="${y}" width="8" height="${h}" fill="${ink}"/><path d="M${x + w / 2 - 16} ${y + 6} L${x + w / 2 + 16} ${y + 6} L${x + w / 2 + 10} ${y + 30} L${x + w / 2 - 10} ${y + 30} Z" fill="#f4d98a" stroke="${ink}" stroke-width="3"/>`;
-      case 'shop': return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W}"/><rect x="${x + 12}" y="${y + 30}" width="${w - 24}" height="${h - 44}" fill="#cfe0e3"/><rect x="${x}" y="${y}" width="${w}" height="22" fill="${P.accent}"/>`;
-      case 'hedge': return `<rect x="${x}" y="${y + h * 0.3}" width="${w}" height="${h * 0.7}" rx="20" fill="#4f7a3e"/><path d="M${x} ${y + h} L${x + w} ${y + h * 0.75}" stroke="#d8c79c" stroke-width="16" opacity=".7"/>`;
-      default: return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W2}"/>`;
+          : [0, 1, 2].map((r) => [0, 1, 2, 3, 4].map((i) => `<rect x="${x + w * 0.16 + i * w * 0.13}" y="${y + r * h / 4 + 10}" width="${w * 0.09}" height="${h / 4 - 16}" fill="${['#8a3b2e', '#3f5e3a', '#5b4a7a', '#a3763a', '#2f5f80'][(i + r) % 5]}"/>`).join('')).join('')); break;
+      case 'stand': body = `<rect x="${x + w * 0.3}" y="${y + h * 0.5}" width="${w * 0.4}" height="${h * 0.5}" fill="${W}" ${ol}/><rect x="${x + w * 0.27}" y="${y + h * 0.5 - 8}" width="${w * 0.46}" height="10" fill="${W2}"/><rect x="${x + w * 0.36}" y="${y + h * 0.62}" width="${w * 0.28}" height="5" fill="#000" opacity=".25"/><rect x="${x + w * 0.42}" y="${y + h * 0.5 - 40}" width="14" height="32" fill="${T}"/><path d="M${x + w * 0.42 - 8} ${y + h * 0.5 - 40} l15 -18 l15 18 Z" fill="#f4d98a"/>`; break;
+      case 'crate': body = `<rect x="${x + w * 0.15}" y="${y + h * 0.35}" width="${w * 0.7}" height="${h * 0.65}" fill="${W2}" stroke="${W}" stroke-width="5"/><path d="M${x + w * 0.15} ${y + h * 0.35} L${x + w * 0.85} ${y + h}" stroke="${W}" stroke-width="5"/>`; break;
+      case 'stall': body = `<rect x="${x}" y="${y + h * 0.5}" width="${w}" height="${h * 0.5}" fill="${W2}" ${ol}/><path d="M${x - 8} ${y + h * 0.3} L${x + w + 8} ${y + h * 0.3} L${x + w} ${y} L${x} ${y} Z" fill="${P.accent}" ${ol}/>` +
+        [0, 1, 2, 3].map((i) => `<rect x="${x + i * w / 4}" y="${y}" width="${w / 8}" height="${h * 0.3}" fill="#f2ead4" opacity=".7"/>`).join('') + `<rect x="${x + 4}" y="${y + h * 0.3}" width="6" height="${h * 0.2}" fill="${W}"/><rect x="${x + w - 10}" y="${y + h * 0.3}" width="6" height="${h * 0.2}" fill="${W}"/>`; break;
+      case 'pump': body = `<rect x="${x + w / 2 - 12}" y="${y + 20}" width="24" height="${h - 20}" fill="${S}" ${ol}/><rect x="${x + w / 2 - 18}" y="${y + 10}" width="36" height="14" rx="6" fill="${ink}" opacity=".75"/><path d="M${x + w / 2 + 12} ${y + 60} l26 0 l0 10" stroke="${S}" stroke-width="8" fill="none"/><path d="M${x + w / 2 - 12} ${y + 40} l-30 -20" stroke="${ink}" stroke-width="5"/>`; break;
+      case 'board': body = `<rect x="${x + 10}" y="${y + 10}" width="${w - 20}" height="${h * 0.55}" fill="${W2}" stroke="${W}" stroke-width="6"/>` + [0, 1, 2].map((i) => `<rect x="${x + 22 + i * (w - 44) / 3}" y="${y + 22 + (i % 2) * 10}" width="${(w - 60) / 3}" height="${h * 0.3}" fill="#f2ead4" transform="rotate(${i - 1} ${x + w / 2} ${y + h / 3})"/>`).join('') +
+        `<rect x="${x + 22}" y="${y + 10 + h * 0.55}" width="8" height="${h * 0.45 - 10}" fill="${W}"/><rect x="${x + w - 30}" y="${y + 10 + h * 0.55}" width="8" height="${h * 0.45 - 10}" fill="${W}"/>`; break;
+      case 'bench': body = `<rect x="${x}" y="${y + h * 0.45}" width="${w}" height="12" fill="${W2}" ${ol}/><rect x="${x}" y="${y + h * 0.2}" width="${w}" height="10" fill="${W2}" ${ol}/><rect x="${x + 10}" y="${y + h * 0.2}" width="8" height="${h * 0.8}" fill="${W}"/><rect x="${x + w - 18}" y="${y + h * 0.2}" width="8" height="${h * 0.8}" fill="${W}"/>`; break;
+      case 'tree': body = `<rect x="${x + w / 2 - 12}" y="${y + h * 0.4}" width="24" height="${h * 0.6}" fill="${W}"/><circle cx="${x + w / 2}" cy="${y + h * 0.3}" r="${w * 0.38}" fill="#4f7a3e"/><circle cx="${x + w / 2 - w * 0.22}" cy="${y + h * 0.42}" r="${w * 0.22}" fill="#5c8a47"/>`; break;
+      case 'steps': body = [0, 1, 2, 3].map((i) => `<rect x="${x + i * 10}" y="${y + h - (i + 1) * h / 4}" width="${w - i * 20}" height="${h / 4}" fill="${Hex.mix(S, '#fff', i * 0.08)}" stroke="${ink}" stroke-width="1.5" stroke-opacity=".4"/>`).join(''); break;
+      case 'scale': body = `<rect x="${x + w / 2 - 4}" y="${y + 20}" width="8" height="${h - 20}" fill="${ink}"/><path d="M${x + 20} ${y + 30} L${x + w - 20} ${y + 30}" stroke="${ink}" stroke-width="4"/><path d="M${x + 6} ${y + 60} L${x + 20} ${y + 30} L${x + 34} ${y + 60} Z M${x + w - 34} ${y + 60} L${x + w - 20} ${y + 30} L${x + w - 6} ${y + 60} Z" fill="${T}" ${ol}/>`; break;
+      case 'bollard': body = `<rect x="${x + w / 2 - 16}" y="${y + h * 0.3}" width="32" height="${h * 0.7}" rx="6" fill="${ink}" opacity=".85"/><rect x="${x + w / 2 - 22}" y="${y + h * 0.3}" width="44" height="12" rx="5" fill="${ink}"/><path d="M${x + w / 2} ${y + h * 0.4} q-60 10 -80 50" stroke="${T}" stroke-width="4" fill="none"/>`; break;
+      case 'nets': body = `<path d="M${x} ${y + h} Q${x + w / 2} ${y} ${x + w} ${y + h} Z" fill="#7a6a4a" ${ol}/>` + [1, 2, 3, 4].map((i) => `<path d="M${x + i * w / 5} ${y + h} Q${x + w / 2} ${y + h * 0.2} ${x + w - i * w / 5} ${y + h}" stroke="#c9b98a" stroke-width="1.5" fill="none"/>`).join(''); break;
+      case 'hut': body = `<rect x="${x + 10}" y="${y + h * 0.3}" width="${w - 20}" height="${h * 0.7}" fill="${W2}" ${ol}/><path d="M${x} ${y + h * 0.32} L${x + w / 2} ${y} L${x + w} ${y + h * 0.32} Z" fill="${W}" ${ol}/><rect x="${x + w * 0.3}" y="${y + h * 0.45}" width="${w * 0.4}" height="${h * 0.25}" fill="${part2(fam)}"/>`; break;
+      case 'lamp': body = `<rect x="${x + w / 2 - 4}" y="${y}" width="8" height="${h}" fill="${ink}"/><path d="M${x + w / 2 - 16} ${y + 6} L${x + w / 2 + 16} ${y + 6} L${x + w / 2 + 10} ${y + 30} L${x + w / 2 - 10} ${y + 30} Z" fill="#f4d98a" stroke="${ink}" stroke-width="3"/>`; break;
+      case 'shop': body = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W}" ${ol}/><rect x="${x + 12}" y="${y + 30}" width="${w - 24}" height="${h - 44}" fill="#cfe0e3"/><rect x="${x}" y="${y}" width="${w}" height="22" fill="${P.accent}"/>`; break;
+      case 'hedge': body = `<rect x="${x}" y="${y + h * 0.3}" width="${w}" height="${h * 0.7}" rx="20" fill="#4f7a3e" ${ol}/><path d="M${x} ${y + h} L${x + w} ${y + h * 0.75}" stroke="#d8c79c" stroke-width="16" opacity=".7"/>`; break;
+      default: body = `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${W2}" ${ol}/>`;
     }
+    return sh + body;
   },
   label(hs, s, M) { return hs.kind === 'obj' ? Rnd.cap(hs.ref.name) : People.label(s, hs.ref, M ? M.hs.filter((x) => x.kind !== 'obj').map((x) => x.ref) : []); },
   svg(s, locId, part, fam, selId) {
     const M = this.model(s, locId, part), P = FAMILY[fam].pal, front = new Set(['table']), lab = (x) => U.esc(this.label(x, s, M));
-    let h = `<svg class="tab" viewBox="0 0 960 540" role="group" aria-label="${U.esc(M.loc.name)}"><defs><radialGradient id="glow"><stop offset="0" stop-color="${fam === 'toekomst' ? P.accent : '#ffd27a'}" stop-opacity="${fam === 'toekomst' ? 0.3 : 0.55}"/><stop offset="1" stop-color="${fam === 'toekomst' ? P.accent : '#ffd27a'}" stop-opacity="0"/></radialGradient></defs>`;
-    h += this.back(M, P, fam);
+    const p = Math.min(2, Math.max(0, part)), idP = 'tb_' + String(M.loc.id).replace(/[^a-zA-Z0-9]/g, '') + '_' + p;
+    let h = `<svg class="tab" data-fam="${fam}" data-part="${p}" viewBox="0 0 960 540" role="group" aria-label="${U.esc(M.loc.name)}">` + this.defs(M, P, fam, idP);
+    h += this.back(M, P, fam, idP);
     const objG = (o) => `<g class="hs obj${selId === o.id ? ' on' : ''}" data-hs="${o.id}" tabindex="0" role="button" aria-label="${lab(o)}">${this.drawProp(o.prop, o.box, P, fam)}<rect class="ring" x="${o.box.x - 4}" y="${o.box.y - 4}" width="${o.box.w + 8}" height="${o.box.h + 8}" rx="8"/></g>`;
-    const figG = (o) => `<g class="hs${selId === o.id ? ' on' : ''}" data-hs="${o.id}" tabindex="0" role="button" aria-label="${lab(o)}"><ellipse class="ring" cx="${o.x}" cy="${o.y}" rx="${46 * o.k}" ry="${11 * o.k}"/>` +
-      `<g transform="translate(${(o.x - 50 * o.k).toFixed(1)} ${(o.y - 260 * o.k).toFixed(1)}) scale(${o.k})">${Silhouette.figure(o.ref, { s: s, fam: fam, mode: 'full', stance: o.kind === 'npc' && s.play.met[o.ref.id] ? TONE_STANCE[Rels.toneOf(s, o.ref.id)] : 0 })}</g>` +
-      `<rect x="${o.x - 40 * o.k}" y="${o.y - 262 * o.k}" width="${80 * o.k}" height="${262 * o.k}" fill="transparent"/></g>`;
+    const figG = (o) => {
+      const metCore = o.kind === 'npc' && s.play.met[o.ref.id];
+      const fTone = metCore ? Rels.toneOf(s, o.ref.id) : 'neutral';
+      const fStance = metCore ? TONE_STANCE[fTone] : 0;
+      return `<g class="hs${selId === o.id ? ' on' : ''}" data-hs="${o.id}" tabindex="0" role="button" aria-label="${lab(o)}">` +
+        `<ellipse cx="${o.x}" cy="${o.y + 1}" rx="${32 * o.k}" ry="${7 * o.k}" fill="#0c121a" opacity=".22" pointer-events="none"/>` +
+        `<ellipse class="ring" cx="${o.x}" cy="${o.y}" rx="${46 * o.k}" ry="${11 * o.k}"/>` +
+        `<g transform="translate(${(o.x - 50 * o.k).toFixed(1)} ${(o.y - 260 * o.k).toFixed(1)}) scale(${o.k})">${Silhouette.figure(o.ref, { s: s, fam: fam, mode: 'full', tone: fTone, stance: fStance })}</g>` +
+        `<rect x="${o.x - 40 * o.k}" y="${o.y - 262 * o.k}" width="${80 * o.k}" height="${262 * o.k}" fill="transparent"/></g>`;
+    };
     // herberg: crowd standing in the counter's span is drawn behind it (staff and regulars at the bar)
     const behind = (o) => M.kind === 'herberg' && o.back && o.x < 400, mid = new Set(M.kind === 'herberg' ? ['counter', 'ledger'] : []);
     M.hs.filter((o) => o.kind === 'obj' && !front.has(o.prop) && !mid.has(o.prop)).forEach((o) => { h += objG(o); });
@@ -1136,9 +1377,15 @@ const Tableau = {
     M.hs.filter((o) => o.kind !== 'obj' && o.back && !behind(o)).forEach((o) => { h += figG(o); });
     M.hs.filter((o) => o.kind !== 'obj' && !o.back).forEach((o) => { h += figG(o); });
     M.hs.filter((o) => o.kind === 'obj' && front.has(o.prop)).forEach((o) => { h += objG(o); });
-    if (part === 0) h += `<rect width="960" height="540" fill="#fff3d6" opacity=".1" pointer-events="none"/>`;
-    if (part >= 2) { h += `<rect width="960" height="540" fill="#141c2e" opacity="${M.kind === 'outside' ? 0.34 : 0.28}" pointer-events="none"/>`;
-      (M.kind === 'herberg' ? [[300, 110], [690, 110], [858, 380]] : M.kind === 'inside' ? [[640, 120]] : []).forEach((q) => { h += `<circle cx="${q[0]}" cy="${q[1]}" r="230" fill="url(#glow)" style="mix-blend-mode:screen" pointer-events="none"/>`; }); }
+    // time-of-day atmospheric light overlay
+    if (part === 0) h += `<rect width="960" height="540" fill="${fam === 'toekomst' ? '#8be8df' : '#ffedc2'}" opacity=".11" pointer-events="none"/>`;
+    if (part >= 2) {
+      h += `<rect width="960" height="540" fill="#101828" opacity="${M.kind === 'outside' ? 0.36 : 0.28}" pointer-events="none"/>`;
+      const lights = M.kind === 'herberg' ? [[300, 108, 220, 'glow'], [690, 108, 220, 'glow'], [858, 368, 210, 'hearth']]
+        : M.kind === 'inside' ? [[640, 118, 240, 'glow']]
+        : [[156, 250, 165, 'glow'], [804, 250, 165, 'glow']];
+      lights.forEach((q) => { h += `<circle cx="${q[0]}" cy="${q[1]}" r="${q[2]}" fill="url(#${idP}_${q[3]})" style="mix-blend-mode:screen" pointer-events="none"/>`; });
+    }
     if (!M.open) h += `<g pointer-events="none"><rect width="960" height="540" fill="#141c2e" opacity=".45"/><rect x="330" y="232" width="300" height="76" rx="6" fill="#fffaf0" stroke="#1f2933" stroke-width="3"/><text x="480" y="268" text-anchor="middle" font-size="24" font-weight="700" font-family="Georgia,serif" fill="#1f2933">Gesloten</text><text x="480" y="292" text-anchor="middle" font-size="14" fill="#1f2933">${part >= DAY.parts ? "'s nachts" : 'in de ' + PARTS[part]}</text></g>`;
     M.hs.forEach((o) => {
       const t = this.label(o, s, M), w = Math.min(380, 18 + t.length * 8), cx = o.kind === 'obj' ? o.box.x + o.box.w / 2 : o.x, top = o.kind === 'obj' ? o.box.y - 14 : o.y - 262 * o.k - 12;
@@ -1201,7 +1448,7 @@ const Interrogation = {
     const left = `<aside class="iv-left" style="--tone:${TONE_COLOR[tone]};--phbg:${F.photo}">
       <div class="iv-frame" data-tone="${tone}" data-stance="${STANCE_LABEL[stance]}">
         <div class="iv-badge">${U.esc(TONE_WORD[tone])} · houding: ${STANCE_LABEL[stance]}</div>
-        <div class="iv-sil">${Silhouette.svg(npc, { s: s, fam: fam, mode: 'full', stance: stance, w: 176 })}</div>
+        <div class="iv-sil">${Silhouette.svg(npc, { s: s, fam: fam, mode: 'full', tone: tone, stance: stance, w: 176 })}</div>
       </div>
       <div class="iv-meta">
         <h3>${U.esc(npc.name)}</h3>
@@ -1407,12 +1654,12 @@ const Figures = {
     const cast = s.cast.slice().sort(byName), crowd = s.crowd.slice().sort(byName), lw = 120;
     let line = `<svg viewBox="0 0 ${cast.length * lw + 40} 330" width="${cast.length * lw + 40}" height="330" aria-hidden="true">`;
     for (let m = 1.0; m <= 1.85; m += 0.1) { const y = (290 - m * 148).toFixed(1); line += `<line x1="0" y1="${y}" x2="${cast.length * lw + 40}" y2="${y}" stroke="var(--sp-line)"/><text x="4" y="${y - 3}" font-size="10" fill="var(--sp-mute)">${m.toFixed(1).replace('.', ',')} m</text>`; }
-    cast.forEach((n, i) => { const tone = Rels.toneOf(s, n.id); line += `<g transform="translate(${40 + i * lw} 30)">${Silhouette.figure(n, { s: s, fam: fam, mode: 'full', stance: TONE_STANCE[tone] })}</g>`; });
+    cast.forEach((n, i) => { const tone = Rels.toneOf(s, n.id); line += `<g transform="translate(${40 + i * lw} 30)">${Silhouette.figure(n, { s: s, fam: fam, mode: 'full', tone: tone, stance: TONE_STANCE[tone] })}</g>`; });
     line += '</svg>';
-    let h = `<h3>De mensen van deze zaak</h3><p class="sp-note">Op naam gesorteerd. Houding volgt de toon tegen jou; de kaderkleur ook. De accentkleur hoort bij de publieke rol.</p><div class="lineup">${line}<div class="strip" style="padding:6px 0 10px 40px;gap:0">` +
+    let h = `<h3>De mensen van deze zaak</h3><p class="sp-note">Op naam gesorteerd. Houding en expressie volgen de toon tegen jou; de kaderkleur ook. De accentkleur hoort bij de publieke rol.</p><div class="lineup">${line}<div class="strip" style="padding:6px 0 10px 40px;gap:0">` +
       cast.map((n) => `<figure style="width:${lw}px"><b>${U.esc(U.first(n))}</b>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</figure>`).join('') + '</div></div>';
     const ref = cast[0];
-    h += `<h3>Drie houdingen</h3><div class="strip">` + ['warm', 'cold', 'hostile'].map((t) => `<figure><span class="frame" style="--c:${TONE_COLOR[t]};background:${FAMILY[fam].photo}">${Silhouette.svg(ref, { s: s, fam: fam, stance: TONE_STANCE[t], w: 88 })}</span><b>${STANCE_LABEL[TONE_STANCE[t]]}</b>${TONE_WORD[t]}</figure>`).join('') + '</div>';
+    h += `<h3>Vier stemmingen</h3><div class="strip">` + ['warm', 'neutral', 'cold', 'hostile'].map((t) => `<figure><span class="frame" style="--c:${TONE_COLOR[t]};background:${FAMILY[fam].photo}">${Silhouette.svg(ref, { s: s, fam: fam, tone: t, stance: TONE_STANCE[t], w: 88 })}</span><b>${TONE_WORD[t]}</b>${STANCE_LABEL[TONE_STANCE[t]]}</figure>`).join('') + '</div>';
     h += `<h3>Dezelfde persoon in vier tijdvakken</h3><div class="strip">` + ['oud', 'klassiek', 'modern', 'toekomst'].map((f) => `<figure><span class="frame" style="width:110px;height:200px;background:${FAMILY[f].photo}">${Silhouette.svg(ref, { s: s, fam: f, mode: 'full', w: 74 })}</span><b>${f}</b></figure>`).join('') + '</div>';
     h += `<h3>Figuranten</h3><p class="sp-note">Bijfiguren zijn grijzer, zodat de mensen die je kunt verhoren eruit springen.</p><div class="strip">` +
       crowd.map((c) => `<figure><span class="frame" style="background:${FAMILY[fam].photo}">${Silhouette.svg(c, { s: s, fam: fam, crowd: true, w: 80 })}</span><b>${U.esc(U.first(c))}</b>${U.esc(c.role)}</figure>`).join('') + '</div>';

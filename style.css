@@ -2974,6 +2974,101 @@ table.sched tr.dim { opacity: 0.65; }
   }
 }
 
+/* =====================================================================
+   Fase F (v0.16.0): Woodcut portraits & palpable "Aha!" breakthrough cues
+   ===================================================================== */
+
+.sil {
+  display: block;
+  shape-rendering: geometricPrecision;
+}
+.ph, .det-port, .p-port, .jframe, .mx-port {
+  box-shadow: inset 0 0 0 1px rgba(29, 38, 47, 0.12), inset 0 -10px 18px rgba(29, 38, 47, 0.08);
+}
+
+#aha {
+  position: fixed;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0));
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 42;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  max-width: min(460px, 92vw);
+  padding: 10px 16px 10px 13px;
+  background: var(--card);
+  color: var(--card-ink);
+  border: 1.5px solid var(--card-border);
+  border-left: 5px solid var(--lead);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  opacity: 0;
+}
+#aha[hidden] { display: none; }
+#aha.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  animation: aha-in 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+#aha .aha-ic {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--lead-bg);
+  color: var(--lead);
+}
+#aha .aha-txt {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+#aha .aha-txt b {
+  font: 700 0.94rem/1.2 var(--serif);
+  color: var(--card-ink);
+}
+#aha .aha-txt span {
+  font: 500 0.82rem/1.35 var(--sans);
+  color: var(--card-mute);
+}
+#aha.aha-confront { border-left-color: var(--accent); }
+#aha.aha-confront .aha-ic { background: var(--accent-soft, rgba(164, 53, 40, 0.14)); color: var(--accent); }
+#aha.aha-alibi-break { border-left-color: var(--bad); }
+#aha.aha-alibi-break .aha-ic { background: rgba(164, 53, 40, 0.14); color: var(--bad); }
+#aha.aha-alibi-ok { border-left-color: var(--ok); }
+#aha.aha-alibi-ok .aha-ic { background: rgba(48, 107, 52, 0.14); color: var(--ok); }
+#aha.aha-clue { border-left-color: var(--lead); }
+#aha.aha-tip { border-left-color: var(--ink-soft); }
+#aha.aha-tip .aha-ic { background: var(--surface-2); color: var(--ink); }
+
+@keyframes aha-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+.pulse-new {
+  animation: tab-pulse 0.75s ease-out 2;
+}
+@keyframes tab-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(212, 160, 48, 0.7); }
+  70%  { box-shadow: 0 0 0 8px rgba(212, 160, 48, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(212, 160, 48, 0); }
+}
+
+.iv-frame.aha-flash {
+  animation: iv-flash 0.65s ease-out;
+}
+@keyframes iv-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(164, 53, 40, 0.65); }
+  45%  { box-shadow: 0 0 0 7px rgba(164, 53, 40, 0.28); }
+  100% { box-shadow: var(--shadow-sm); }
+}
+
 @media (pointer: coarse) {
   .sp-chip, .sp-btn, .sp-act, #app .sp-tabs button, #app .sp-tools button, #app .sp-hbtn, #app .sp-clock, .sp-x, .tv-pop-x, #app .coach-go, #app .coach-skip, #app .mx-chip, #app .mx-mark, #app .sp-mark, #app .bd-hint-btn, .phead button, .hint-step {
     min-height: 44px;

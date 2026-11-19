@@ -1188,6 +1188,30 @@ const DEFAULT_CONTENT = {
    "\"Dan heb ik het verkeerd onthouden. Mag dat?\" Het klinkt ingestudeerd.",
    "Een kort, droog lachje. \"Getuigen. Die zien altijd wat ze willen zien.\" Maar de blik dwaalt weg."
   ],
+  "confront.wrong.warm": [
+   "Ik wil je graag helpen, maar ik zie werkelijk niet wat dat stuk met mijn verhaal te maken heeft.",
+   "Kijk nog eens rustig, want dat zegt niets over waar ik die avond was.",
+   "Dat bewijst niets tegen mij, hoor. Misschien leg je het verkeerde spoor naast mijn woorden.",
+   "Ik begrijp dat je alles nagaat, maar hier kan ik echt niets mee."
+  ],
+  "confront.wrong.neutral": [
+   "Dat stuk weerlegt mijn verklaring niet. Daarvoor moet je met iets beters komen.",
+   "Ik zie het verband niet. Mijn woorden blijven gewoon staan.",
+   "Interessant misschien, maar het spreekt niet tegen wat ik heb verteld.",
+   "Daar staat niets in wat mij op een andere plek plaatst."
+  ],
+  "confront.wrong.cold": [
+   "Bespaar me dat. Wat je daar laat zien heeft niets met mijn verklaring te maken.",
+   "Als je mij ergens op wilt betrappen, breng dan iets mee dat echt op mij slaat.",
+   "Dat raakt kant noch wal. Lees je eigen aantekeningen nog maar eens na.",
+   "Zwak geprobeerd. Dat stuk verandert geen letter aan wat ik zei."
+  ],
+  "confront.wrong.hostile": [
+   "Wat een onzin. Houd dat maar voor jezelf en val mij er niet mee lastig.",
+   "Denk je nu echt dat je mij daarmee in het nauw drijft? Belachelijk.",
+   "Stop met dat gegis. Dat stuk heeft niets met mij te maken en dat weet je best.",
+   "Je verspilt mijn tijd met losse flodders. Kom terug als je echt iets hebt."
+  ],
   "flip.culprit": [
    "{first} is de laatste tijd stiller, en kijkt je niet meer recht aan.",
    "{first} groet je nog, maar de warmte is verdwenen.",

@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- v0.15.0: clickable mentions with spiekkaart (#peek), discovered schedule tips, optional 3-tier Solver hint ("Geef een zetje"), safe confirmations for big steps, and crisp first-60s onboarding. Load order matters: content, library, engine, views, ui. -->
+<!-- v0.16.0: stylized ink-line/woodcut 0 KB SVG portraits with mood expressions, deeper era/time-of-day Tableau scenes, calmer city-map badges, palpable "Aha!" breakthrough feedback, in-character wrong-evidence confrontation replies, and expanded 0 KB WebAudio SFX. Load order matters: content, library, engine, views, ui. -->
 <a class="skip-link" href="#main">Ga naar inhoud</a>
 <div id="app" hidden></div>
 <div id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle" hidden>
@@ -30,6 +30,7 @@
     <div id="pBody"></div>
   </div>
 </div>
+<div id="aha" class="aha" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 <div id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 <script defer src="content.js"></script>
 <script defer src="lib.js"></script>
