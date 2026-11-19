@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.14.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.15.0', schema: 8 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -445,6 +445,7 @@ const Crowd = {
     if (!use[tipKey] && tr.next() < 0.45) {
       const who = s.cast.filter((n) => [0, 1, 2].some((p) => Schedule.at(s, n.id, s.clock.day, p) === loc.id)).sort(byNameE);
       if (who.length) { use[tipKey] = 1; const n = tr.pick(who), p = [0, 1, 2].find((q) => Schedule.at(s, n.id, s.clock.day, q) === loc.id);
+        Mentions.addSched(s, n.id, p, loc.id, c.name + ', ' + c.role);
         return Text.q(Text.say(s, 'crowd.sched', Text.vars(s, { name: n.name, part: PARTS[p] }), 'tip|' + c.id)); }
     }
     const keys = ['crowd.any', 'crowd.tpl.' + loc.template], rk = 'crowd.role.' + Content.slug(c.role);
@@ -796,11 +797,12 @@ const Log = {
   crowd: (s, c, text) => Log.push(s, { k: 'c', name: c.name, role: c.role, text: text })
 };
 
-/* ---------------- Mentions (v0.12.0): people and places you have heard of but not yet found ----------------
+/* ---------------- Mentions (v0.12.0 / v0.15.0): heard-of names/places, clickable hypertext & schedule tips ----------------
    Read only from text the player has seen (every log line), so it never knows more than the player. A person counts
-   by full name, or by first name when nobody else in the town shares it. Stored in play.heardOf and play.heardOfLoc. */
+   by full name, or by first name when nobody else in the town shares it. Stored in play.heardOf, play.heardOfLoc and play.knownSched. */
 const Mentions = {
   rx: (w) => new RegExp('(^|[^A-Za-zÀ-ÿ])' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-zÀ-ÿ])'),
+  _escRe: (w) => String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
   firsts(s) { const n = {}; s.cast.concat(s.crowd || [], [s.protagonist || { name: '' }]).forEach((x) => { const f = String(x.name || '').split(' ')[0]; n[f] = (n[f] || 0) + 1; }); return n; },
   scan(s, e) {
     if (!s || !s.play || !e || !e.text || !s.cast) return;
@@ -812,6 +814,56 @@ const Mentions = {
       if (text.indexOf(n.name) >= 0 || (F[f] === 1 && f.length > 2 && this.rx(f).test(text))) p.heardOf[n.id] = { by: src, day: s.clock ? s.clock.day : 1 };
     });
     ((s.world && s.world.locations) || []).forEach((l) => { if (!p.visited[l.id] && !p.heardOfLoc[l.id] && text.indexOf(l.name) >= 0) p.heardOfLoc[l.id] = { by: src }; });
+  },
+  // v0.15.0: store a schedule tip the player discovered via a figurant or object (never leaks unfound info)
+  addSched(s, npcId, part, locId, via) {
+    if (!s || !s.play || !npcId || typeof part !== 'number' || !locId) return false;
+    const ks = s.play.knownSched = s.play.knownSched || {};
+    const list = ks[npcId] = ks[npcId] || [];
+    if (list.some((t) => t.part === part && t.locId === locId)) return false;
+    list.push({ part: part, locId: locId, via: via || '' });
+    return true;
+  },
+  schedOf(s, npcId) {
+    return (s && s.play && s.play.knownSched && Array.isArray(s.play.knownSched[npcId])) ? s.play.knownSched[npcId] : [];
+  },
+  // v0.15.0: deterministic, order-independent list of linkable names and places (longest phrase first)
+  targets(s, opt) {
+    if (!s || !s.cast) return [];
+    const ex = new Set(Array.isArray(opt && opt.exclude) ? opt.exclude : opt && opt.exclude ? [opt.exclude] : []);
+    const F = this.firsts(s), out = [];
+    s.cast.slice().sort(byNameE).forEach((n) => {
+      const ref = 'p:' + n.id; if (ex.has(ref)) return;
+      out.push({ text: n.name, ref: ref, kind: 'p' });
+      const f = U.first(n);
+      if (F[f] === 1 && f.length > 2) out.push({ text: f, ref: ref, kind: 'p' });
+    });
+    ((s.world && s.world.locations) || []).slice().sort(byNameE).forEach((l) => {
+      const ref = 'l:' + l.id; if (ex.has(ref)) return;
+      out.push({ text: l.name, ref: ref, kind: 'l' });
+    });
+    return out.sort((a, b) => (b.text.length - a.text.length) || a.text.localeCompare(b.text, 'nl') || (a.ref < b.ref ? -1 : 1));
+  },
+  // v0.15.0: turn plain text into HTML with clickable <button class="mention"> links for known people & places
+  linkHtml(s, rawText, opt) {
+    const str = String(rawText == null ? '' : rawText);
+    if (!str || !s) return U.esc(str);
+    const list = this.targets(s, opt);
+    if (!list.length) return U.esc(str);
+    const byText = {}; list.forEach((x) => { if (!byText[x.text]) byText[x.text] = x; });
+    const pat = list.map((x) => this._escRe(x.text)).join('|');
+    const re = new RegExp('(^|[^A-Za-zÀ-ÿ])(' + pat + ')(?![A-Za-zÀ-ÿ])', 'g');
+    let out = '', last = 0, m;
+    while ((m = re.exec(str)) !== null) {
+      const pre = m[1], hit = m[2], hitStart = m.index + pre.length, hitEnd = hitStart + hit.length;
+      const item = byText[hit];
+      if (!item) continue;
+      out += U.esc(str.slice(last, hitStart));
+      out += `<button type="button" class="mention m-${item.kind}" data-mention="${U.esc(item.ref)}">${U.esc(hit)}</button>`;
+      last = hitEnd;
+      re.lastIndex = hitEnd;
+    }
+    return out + U.esc(str.slice(last));
   },
   // where you heard of someone, in a few words
   source(s, h) { if (!h || !h.by) return 'in je notities'; if (h.by.indexOf('c:') === 0) return 'door ' + h.by.slice(2); const n = World.npc(s, h.by); return n ? 'door ' + n.name : 'in je notities'; }
@@ -878,6 +930,7 @@ const World = {
       const who = s.cast.filter((n) => [0, 1, 2].some((p) => Schedule.at(s, n.id, s.clock.day, p) === loc.id)).sort(byNameE);
       if (!who.length) return null;
       const n = r.pick(who), p = [0, 1, 2].find((q) => Schedule.at(s, n.id, s.clock.day, q) === loc.id);
+      Mentions.addSched(s, n.id, p, loc.id, obj.name);
       return Text.say(s, 'obj.y.sched', { obj: obj.name, name: n.name, part: PARTS[p] }, tag);
     }
     if (y.k === 'char') {
@@ -1646,6 +1699,112 @@ const Solver = {
   }
 };
 
+/* ---------------- Hints (v0.15.0): optional 3-tier "Geef een zetje" helper ----------------
+   Pure & read-only. Uses public discovered state and reachability (Solver-style) without ever revealing
+   truth.culpritId. Tier 1 = direction, Tier 2 = specific action, Tier 3 = connection/what is still missing. */
+const Hints = {
+  slotNeed(s) {
+    const p = s.play, found = Evidence.found(s).filter((e) => !p.debunked[e.id]);
+    return {
+      motive: found.some((e) => e.slot === 'motive'),
+      method: found.some((e) => e.slot === 'method')
+    };
+  },
+  slotLabel: (slot) => slot === 'motive' ? 'het motief' : slot === 'method' ? 'de werkwijze of het alibi' : 'een nieuw aanknopingspunt',
+  get(s, tier) {
+    if (!s || s.play.ended) return null;
+    const t = Math.max(1, Math.min(3, +tier || 1)), p = s.play, need = this.slotNeed(s);
+    const wrap = (kind, title, texts) => ({
+      tier: t, kind: kind, title: title, text: texts[t - 1], hasNext: t < 3
+    });
+
+    // 1. A heard contradiction whose counter-evidence the player already holds
+    const readyCon = s.contradictions.slice().sort((a, b) => a.id < b.id ? -1 : 1)
+      .find((c) => p.heard[c.id] && !p.resolved[c.id] && p.found[c.counterEvidence]);
+    if (readyCon) {
+      const npc = World.npc(s, readyCon.npcId), ev = Evidence.get(s, readyCon.counterEvidence), yEv = Evidence.get(s, readyCon.yields);
+      const locNow = s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, npc.id, s.clock.day, s.clock.part)) : null;
+      return wrap('confront', 'Tegenstrijdige verklaring', [
+        'Een verklaring die je al hebt gehoord, botst met een van je gevonden bewijsstukken.',
+        'Spreek ' + npc.name + ' opnieuw aan tijdens een bezoek en leg een bewijsstuk voor.',
+        'Leg "' + ev.title + '" voor tijdens een verhoor met ' + npc.name + (locNow ? ' (nu bij ' + locNow.name + ')' : '') + ' om de verklaring door te prikken' + (yEv && yEv.slot ? ' — dat levert bewijs op voor ' + this.slotLabel(yEv.slot) + '.' : '.')
+      ]);
+    }
+
+    // 2. An unchecked alibi with a named companion
+    const openAl = s.cast.slice().sort(byNameE).find((n) => {
+      const a = s.alibis && s.alibis[n.id];
+      return a && a.withId && p.asked[n.id + ':alibi'] && !(p.alibiCheck && p.alibiCheck[n.id]);
+    });
+    if (openAl) {
+      const comp = World.npc(s, s.alibis[openAl.id].withId);
+      const locNow = p.met[comp.id] && s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, comp.id, s.clock.day, s.clock.part)) : null;
+      return wrap('alibi', 'Ongecontroleerd alibi', [
+        'Je hebt een alibi gehoord dat je nog kunt nagaan bij de persoon die erbij was.',
+        'Spreek ' + comp.name + ' aan en vraag naar het alibi van ' + openAl.name + '.',
+        'Controleer het alibi van ' + openAl.name + ' bij ' + comp.name + (locNow ? ' (nu bij ' + locNow.name + ')' : '') + '. Zo zie je wie afvalt en wiens verhaal wankelt.'
+      ]);
+    }
+
+    // 3. Reachable undiscovered evidence (object or talk), prioritizing missing motive/method slots
+    const readyEvs = s.evidence.filter((e) => !p.found[e.id] && e.route !== 'start' && Evidence.reqMet(s, e) && (e.source.type === 'object' || e.source.type === 'talk'));
+    readyEvs.sort((a, b) => {
+      const score = (e) => (e.slot === 'motive' && !need.motive ? 3 : e.slot === 'method' && !need.method ? 3 : e.slot ? 2 : 1) + (e.source.type === 'object' ? 0.2 : 0);
+      return (score(b) - score(a)) || (a.id < b.id ? -1 : 1);
+    });
+    if (readyEvs.length) {
+      const e = readyEvs[0];
+      if (e.source.type === 'object') {
+        const loc = World.loc(s, e.source.locationId), obj = loc.objects.find((o) => o.id === e.source.objectId);
+        const openNow = World.openAt(loc, s.clock.part);
+        return wrap('object', 'Spoor op een locatie', [
+          'Er valt nog iets belangrijks te ontdekken bij ' + loc.name + '.',
+          'Ga naar ' + loc.name + ' en bekijk ' + obj.name + ' van dichtbij.',
+          'Onderzoek ' + obj.name + ' bij ' + loc.name + (openNow ? ' (nu open)' : ' (open van ' + loc.open[0] + ' tot ' + loc.open[1] + ' uur)') + '. Dit helpt je aan ' + this.slotLabel(e.slot) + '.'
+        ]);
+      }
+      const npc = World.npc(s, e.source.npcId);
+      const locNow = p.met[npc.id] && s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, npc.id, s.clock.day, s.clock.part)) : null;
+      return wrap('talk', 'Gesprek met een betrokkene', [
+        'Iemand in de stad weet meer over de zaak dan je tot nu toe hebt gevraagd.',
+        'Spreek ' + npc.name + ' aan en stel de openstaande zaakvraag.',
+        'Spreek ' + npc.name + (locNow ? ' (nu bij ' + locNow.name + ')' : '') + ' en let tijdens het verhoor op de juiste toon. Dit levert ' + this.slotLabel(e.slot) + ' op.'
+      ]);
+    }
+
+    // 4. An unheard contradiction that unlocks further evidence or a confrontation
+    const unheardCon = s.contradictions.slice().sort((a, b) => a.id < b.id ? -1 : 1)
+      .find((c) => !p.heard[c.id] && (p.found[c.counterEvidence] || s.evidence.some((e) => e.needHeard === c.id && !p.found[e.id])));
+    if (unheardCon) {
+      const npc = World.npc(s, unheardCon.npcId);
+      return wrap('claim', 'Verklaring ophalen', [
+        'Vraag betrokkenen naar hun alibi rond ' + s.truth.crimeHour + ' uur — een van die verhalen past niet bij je sporen.',
+        'Spreek ' + npc.name + ' aan en vraag naar het alibi en de zaak.',
+        'Zodra je de verklaring van ' + npc.name + ' hebt gehoord, kun je die naast je bewijsstukken leggen om verder te komen.'
+      ]);
+    }
+
+    // 5. Still missing motive or method and there are unmet people or unasked alibis
+    if (!need.motive || !need.method) {
+      const unmet = s.cast.filter((n) => !p.met[n.id]).sort(byNameE)[0];
+      if (unmet) {
+        return wrap('meet', 'Nog niet iedereen gesproken', [
+          'Er zijn nog betrokkenen die je niet hebt gesproken. Kijk op de kaart bij plekken met een vraagteken.',
+          'Zoek ' + unmet.name + ' op tijdens een bezoek en spreek diegene aan.',
+          'Je mist nog stevig bewijs voor ' + (!need.motive ? 'het motief' : 'de werkwijze') + '. Nieuwe gesprekken openen vaak een vervolgspoor.'
+        ]);
+      }
+    }
+
+    // 6. Ready to deduce and fill out the Zaakverslag
+    return wrap('solve', 'Klaar om te vergelijken', [
+      'Je hebt sterke sporen voor zowel motief als werkwijze. Leg alle aanwijzingen rustig naast elkaar.',
+      'Open het Verdachtenoverzicht op het Zaakbord en vergelijk beginletter, kenmerk en alibi-status van elke betrokkene.',
+      'Slechts één persoon past op alle sporen tegelijk. Vul de drie velden in via Zaakverslag zodra je zeker bent.'
+    ]);
+  }
+};
+
 /* ---------------- Game: create / validate ---------------- */
 const Game = {
   create(seed, level) {
@@ -1657,7 +1816,7 @@ const Game = {
       visit: null,
       meta: w.meta, protagonist: w.protagonist, world: w.world, crime: w.crime, truth: w.truth,
       cast: w.cast, crowd: w.crowd, schedule: null, evidence: w.evidence, contradictions: w.contradictions, relations: w.relations, alibis: w.alibis,
-      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, wrongAccusations: 0, visits: 0, ended: null },
+      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, knownSched: {}, wrongAccusations: 0, visits: 0, ended: null },
       ui: {},
       log: []
     };
@@ -1740,7 +1899,7 @@ const Save = {
     s.player.marks = s.player.marks || {}; s.player.notes = s.player.notes || {};
     Clock.norm(s); s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
     if (!s.play.heardOf || !s.play.heardOfLoc) { s.play.heardOf = s.play.heardOf || {}; s.play.heardOfLoc = s.play.heardOfLoc || {}; (s.log || []).forEach((e) => Mentions.scan(s, e)); }
-    ['metCrowd', 'examined', 'xt', 'xtDone'].forEach((k) => { s.play[k] = s.play[k] || {}; });
+    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched'].forEach((k) => { s.play[k] = s.play[k] || {}; });
     if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
     if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
     return s;
@@ -2010,8 +2169,8 @@ const Tests = {
       });
       return { ok: !bad2.length, info: bad2.length ? bad2.slice(0, 3).join(' | ') : 'hoogste herhaling ' + worst.n + 'x' };
     });
-    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix) -----
-    t('Uiterlijk en verhoorscherm lekken de dader niet: silhouet, bord, verdachtenmatrix, tableau, tempo en verhoor (10 seeds)', () => {
+    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix + v0.15.0 Mentions/Hints) -----
+    t('Uiterlijk en verhoorscherm lekken de dader niet: silhouet, bord, verdachtenmatrix, tableau, tempo, verhoor, mentions en hints (10 seeds)', () => {
       const b2 = [];
       for (let i = 0; i < 10; i++) {
         const s = SpikeData.make('leak-' + i, 'laat'), fam = famOf(s);
@@ -2019,6 +2178,8 @@ const Tests = {
           const base = st.cast.slice().sort(byName).map((n) => Silhouette.svg(n, { fam: fam, mode: 'full' }) + (typeof Interrogation !== 'undefined' ? JSON.stringify(Interrogation.pace(n)) : '')).join('')
             + Board.html(st, fam, null).html
             + Board.matrix(st, fam, null)
+            + Mentions.linkHtml(st, st.crime.summary + ' ' + st.cast.slice().sort(byName).map((n) => n.name).join(' '))
+            + [1, 2, 3].map((tr) => JSON.stringify(Hints.get(st, tr))).join('')
             + st.world.locations.map((l) => Tableau.svg(st, l.id, 1, fam)).join('');
           const ivs = typeof Interrogation !== 'undefined' ? st.cast.slice().sort(byName).map((n) => {
             const clone = U.clone(st);
@@ -2361,10 +2522,75 @@ const Tests = {
     });
     t('Save-compatibiliteit (v0.14.0): oude schema-8 save zonder marks/notes/seen laadt foutloos zonder valse Nieuw-badges', () => {
       const s = SpikeData.make('old8-1', 'midden'), raw = JSON.parse(Save.pack(s));
-      delete raw.player.marks; delete raw.player.notes; delete raw.player.seen; delete raw.player.seenJournal;
+      delete raw.player.marks; delete raw.player.notes; delete raw.player.seen; delete raw.player.seenJournal; delete raw.play.knownSched;
       const back = Save.unpack(JSON.stringify(raw));
-      return { ok: typeof back.player.marks === 'object' && typeof back.player.notes === 'object' && Pins.newIds(back).length === 0 && Pins.journalNew(back) === 0,
+      return { ok: typeof back.player.marks === 'object' && typeof back.player.notes === 'object' && typeof back.play.knownSched === 'object' && Pins.newIds(back).length === 0 && Pins.journalNew(back) === 0,
         info: 'nieuw: ' + Pins.newIds(back).length + '/' + Pins.journalNew(back) };
+    });
+    // ----- v0.15.0 (fase E): clickable mentions, discovered schedule tips, 3-tier Hints -----
+    t('Mentions (v0.15.0): linkHtml koppelt volledige namen, unieke voornamen en plaatsen; ontsnapt HTML en voorkomt deelwoord-matches', () => {
+      const s = Game.create('mlk-1', 'normaal'), F = Mentions.firsts(s);
+      const uniq = s.cast.find((n) => F[U.first(n)] === 1 && U.first(n).length > 2) || s.cast[0];
+      const dup = s.cast.find((n) => F[U.first(n)] > 1);
+      const loc = s.world.locations[0];
+      const f = U.first(uniq);
+      const txt = `<script>x</script> ${uniq.name} liep bij ${loc.name}. Later zag men ${f} en niet ${f}achtig.`;
+      const html = Mentions.linkHtml(s, txt);
+      const safe = html.indexOf('<script>') < 0 && html.indexOf('&lt;script&gt;') >= 0;
+      const hasFull = html.indexOf(`data-mention="p:${uniq.id}">${U.esc(uniq.name)}</button>`) >= 0;
+      const hasLoc = html.indexOf(`data-mention="l:${loc.id}">${U.esc(loc.name)}</button>`) >= 0;
+      const hasFirst = F[f] !== 1 || html.indexOf(`data-mention="p:${uniq.id}">${U.esc(f)}</button>`) >= 0;
+      const noPartial = html.indexOf(`>${U.esc(f)}</button>achtig`) < 0 && html.indexOf(`${U.esc(f)}achtig`) >= 0;
+      const excl = Mentions.linkHtml(s, uniq.name + ' bij ' + loc.name, { exclude: 'p:' + uniq.id });
+      const exclOk = excl.indexOf(`data-mention="p:${uniq.id}"`) < 0 && excl.indexOf(`data-mention="l:${loc.id}"`) >= 0;
+      let dupOk = true;
+      if (dup) {
+        const df = U.first(dup);
+        dupOk = Mentions.linkHtml(s, 'Alleen ' + df + ' was er.').indexOf('data-mention="p:') < 0;
+      }
+      return { ok: safe && hasFull && hasLoc && hasFirst && noPartial && exclOk && dupOk, info: [safe, hasFull, hasLoc, hasFirst, noPartial, exclOk, dupOk].join(', ') };
+    });
+    t('Roostertips (v0.15.0): ontdekte tips via voorwerp/figurant worden gededupliceerd bewaard, getoond op persoonskaart en overleven opslaan', () => {
+      let tested = false, ok = true;
+      for (let i = 0; i < 40 && !tested; i++) {
+        const s = Game.create('schedtip-' + i, 'normaal');
+        let hit = null;
+        s.world.locations.forEach((l) => l.objects.forEach((o) => { if (!hit && o.yield && o.yield.k === 'sched' && World.openAt(l, 0)) hit = { l: l, o: o }; }));
+        if (!hit) continue;
+        Act.force(s, hit.l.id); Act.examine(s, hit.o.id); Act.leave(s);
+        const nid = Object.keys(s.play.knownSched || {})[0];
+        if (!nid) continue;
+        tested = true;
+        const tips1 = Mentions.schedOf(s, nid), tip = tips1[0];
+        const dupAdded = Mentions.addSched(s, nid, tip.part, tip.locId, 'dubbel');
+        const back = Save.unpack(Save.pack(s)), tips2 = Mentions.schedOf(back, nid);
+        back.play.met[nid] = true;
+        const det = Board.detail(back, 'p:' + nid, famOf(back));
+        const locName = World.loc(back, tip.locId).name;
+        ok = tips1.length === 1 && !dupAdded && tips2.length === 1 && det.indexOf('Ontdekte roostertips') >= 0 && det.indexOf(locName) >= 0;
+      }
+      return { ok: tested && ok, info: tested ? 'voorwerp-roostertip geverifieerd' : 'geen sched-voorwerp gevonden' };
+    });
+    t('Hints (v0.15.0): 3-traps Geef een zetje is puur, geeft per fase geldige aanwijzingen en lekt de dader niet (' + nSeeds + ' seeds)', () => {
+      const bad = [];
+      for (let i = 0; i < nSeeds; i++) {
+        const sStart = Game.create('hnt-' + i, 'normaal'), snap = Save.pack(sStart);
+        [1, 2, 3].forEach((tr) => {
+          const h = Hints.get(sStart, tr);
+          if (!h || h.tier !== tr || !h.text || h.text.length < 15 || h.hasNext !== (tr < 3)) bad.push('hnt-' + i + ' start t' + tr);
+        });
+        if (Save.pack(sStart) !== snap) bad.push('hnt-' + i + ' muteert state');
+        const sMid = SpikeData.make('hnt-' + i, 'midden');
+        const hMid = Hints.get(sMid, 2);
+        if (!hMid || !hMid.text) bad.push('hnt-' + i + ' midden');
+        const sSolved = Solver.run(Game.create('hnt-' + i, 'normaal')).state;
+        const hCon = Hints.get(sSolved, 3);
+        if (!hCon || hCon.kind !== 'confront') bad.push('hnt-' + i + ' con=' + (hCon && hCon.kind));
+        sSolved.contradictions.forEach((c) => { sSolved.play.resolved[c.id] = true; });
+        const hLate = Hints.get(sSolved, 3);
+        if (!hLate || hLate.kind !== 'solve') bad.push('hnt-' + i + ' laat=' + (hLate && hLate.kind));
+      }
+      return { ok: !bad.length, info: bad.length ? bad.slice(0, 3).join(' | ') : nSeeds + ' seeds × 3 trappen OK' };
     });
     return out;
   }

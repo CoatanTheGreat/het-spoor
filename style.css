@@ -2609,6 +2609,293 @@ table.sched tr.dim { opacity: 0.65; }
 .fg .frame { display: inline-flex; align-items: flex-end; justify-content: center; width: 96px; height: 108px; border: 2.5px solid var(--c, #1d262f); border-radius: 4px; background: #e6dfcc; overflow: hidden; }
 
 /* =====================================================================
+   Fase E (v0.15.0): Mentions, Spiekkaart (#peek), Hints & Confirmations
+   ===================================================================== */
+
+#app .mention, .mention {
+  display: inline;
+  padding: 0 2px;
+  margin: 0 -1px;
+  border: 0;
+  border-bottom: 1.5px dotted var(--accent);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+#app .mention.m-l, .mention.m-l {
+  border-bottom-color: var(--lead);
+}
+@media (hover: hover) {
+  #app .mention:hover, .mention:hover {
+    background: var(--accent-soft);
+    border-bottom-style: solid;
+  }
+  #app .mention.m-l:hover, .mention.m-l:hover {
+    background: rgba(43, 103, 133, 0.14);
+    border-bottom-style: solid;
+  }
+}
+#app .mention:focus-visible, .mention:focus-visible {
+  outline: 2.5px solid var(--focus);
+  outline-offset: 2px;
+  background: var(--accent-soft);
+}
+
+/* Dedicated Spiekkaart dialog above #modal (z-index 35 > #modal 30) */
+#peek {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(16, 20, 26, 0.48);
+  backdrop-filter: blur(2px);
+}
+#peek[hidden] { display: none; }
+.pbox {
+  width: min(460px, 100%);
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1.5px solid var(--border-strong);
+  border-top: 5px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+.phead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.phead h2 {
+  margin: 0;
+  font: 700 1.12rem/1.2 var(--serif);
+}
+.phead button {
+  min-height: 38px;
+  padding: 6px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 0.86rem var(--sans);
+  cursor: pointer;
+}
+#pBody {
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  font: 0.94rem/1.5 var(--sans);
+}
+#pBody h4 {
+  margin: 12px 0 4px;
+  font: 700 0.84rem/1.25 var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+#pBody p { margin: 0 0 8px; }
+.p-headrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.p-port {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 72px;
+  height: 82px;
+  border: 2.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.p-port.p-blank {
+  align-items: center;
+  border-style: dashed;
+}
+.p-role {
+  font: 700 0.96rem/1.3 var(--serif);
+  margin: 0 0 3px !important;
+}
+.p-km { font: 0.88rem/1.45 var(--sans); }
+.p-my {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font: 0.86rem/1.4 var(--sans);
+}
+.p-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+/* Discovered schedule tips list */
+.sched-tips {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+  font: 0.88rem/1.48 var(--sans);
+}
+.sched-tips li { margin: 3px 0; }
+.sched-tips small { color: var(--ink-soft); }
+
+/* Board hint button & Dagboek hint row */
+#app .bd-hint-btn {
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 0.84rem var(--sans);
+  cursor: pointer;
+}
+@media (hover: hover) {
+  #app .bd-hint-btn:hover {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+}
+.j-hint-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 14px;
+  padding: 10px 12px;
+  margin: 10px 0 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.j-hint-row p { margin: 0; flex: 1 1 220px; }
+
+/* 3-tier Hint modal */
+.hint-box h3 {
+  margin: 12px 0 6px;
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.hint-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.hint-step {
+  min-height: 36px;
+  padding: 5px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink-soft);
+  font: 600 0.82rem var(--sans);
+  cursor: pointer;
+}
+.hint-step.done {
+  border-color: var(--border-strong);
+  color: var(--ink);
+}
+.hint-step.on {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--surface);
+}
+.hint-txt {
+  font: 1.02rem/1.58 var(--serif);
+  padding: 12px 14px;
+  margin: 8px 0 14px;
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg);
+}
+.hint-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+/* Confirmation dialog */
+.confirm-box p { margin: 0 0 10px; font: 0.96rem/1.52 var(--sans); }
+.confirm-list {
+  list-style: none;
+  margin: 10px 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.confirm-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.confirm-list li:last-child { border-bottom: 0; }
+.confirm-list span { color: var(--ink-soft); min-width: 132px; }
+.confirm-warn {
+  padding: 9px 12px;
+  border-left: 4px solid var(--bad);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font: 600 0.9rem/1.45 var(--sans);
+}
+.confirm-acts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.chip.danger {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #fffdf8;
+}
+
+/* Cold opening tip */
+.co-tip {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border-left: 3.5px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg);
+  color: var(--ink-soft);
+  font: 0.88rem/1.45 var(--sans);
+}
+
+/* =====================================================================
    Responsive Breakpoints (iPad Landscape, Portrait & Mobile — No Lockout)
    ===================================================================== */
 
@@ -2688,7 +2975,7 @@ table.sched tr.dim { opacity: 0.65; }
 }
 
 @media (pointer: coarse) {
-  .sp-chip, .sp-btn, .sp-act, #app .sp-tabs button, #app .sp-tools button, #app .sp-hbtn, #app .sp-clock, .sp-x, .tv-pop-x, #app .coach-go, #app .coach-skip, #app .mx-chip, #app .mx-mark, #app .sp-mark {
+  .sp-chip, .sp-btn, .sp-act, #app .sp-tabs button, #app .sp-tools button, #app .sp-hbtn, #app .sp-clock, .sp-x, .tv-pop-x, #app .coach-go, #app .coach-skip, #app .mx-chip, #app .mx-mark, #app .sp-mark, #app .bd-hint-btn, .phead button, .hint-step {
     min-height: 44px;
   }
   .tv-pop-x { min-width: 44px; }

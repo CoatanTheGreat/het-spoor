@@ -363,26 +363,26 @@ const Board = {
     const l = World.loc(s, c.ref);
     return `<div class="bc tk${clsExtra}" ${attr} style="${rotSt}"><i style="background:${TEMPLATE_COLOR[l.template] || '#fff'}" aria-hidden="true"></i><span>${U.esc(l.name)}</span>${ex.hasNew ? '<span class="bc-new">Nieuw</span>' : ''}${ex.mark ? `<span class="bc-mark m-${ex.mark}" aria-hidden="true">${Pins.MARKS[ex.mark].icon}</span>` : ''}</div>`;
   },
-  // top toolbar of the board: switch between Prikbord and Verdachtenoverzicht, plus link-mode & "Alles gezien" controls
+  // top toolbar of the board: switch between Prikbord and Verdachtenoverzicht, plus link-mode, "Alles gezien" & optional hint controls
   bar(s, mode, link, threadKind) {
     const metN = s.cast.filter((n) => s.play.met[n.id]).length;
     const newN = Pins.newIds(s).length;
     const tk = threadKind && Pins.THREAD_KINDS[threadKind] ? threadKind : 'verband';
+    const hintBtn = !s.play.ended && Level.id(s) !== 'moeilijk' ? `<button type="button" class="bd-hint-btn" data-ui="hint">Geef een zetje</button>` : '';
     let right = '';
-    if (mode !== 'matrix') {
-      if (link) {
-        right = `<div class="bd-linkbar" role="region" aria-label="Draadjes trekken">` +
-          `<span>Draadje vanaf <b>${U.esc(this.title(s, link))}</b>:</span>` +
-          `<div class="bd-tkinds" role="group" aria-label="Betekenis van draadje">` +
-          Object.keys(Pins.THREAD_KINDS).map((k) => `<button type="button" class="bd-tkind tk-${k}${tk === k ? ' on' : ''}" aria-pressed="${tk === k}" data-ui="thkind" data-v="${k}"><i aria-hidden="true"></i>${U.esc(Pins.THREAD_KINDS[k].label)}</button>`).join('') +
-          `</div><button type="button" class="sp-chip on" data-sp="linkdone">Klaar</button></div>`;
-      } else {
-        const tCount = Pins.threads(s).length;
-        right = `<div class="bd-meta">` +
-          (tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
-          (newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
-          `</div>`;
-      }
+    if (mode !== 'matrix' && link) {
+      right = `<div class="bd-linkbar" role="region" aria-label="Draadjes trekken">` +
+        `<span>Draadje vanaf <b>${U.esc(this.title(s, link))}</b>:</span>` +
+        `<div class="bd-tkinds" role="group" aria-label="Betekenis van draadje">` +
+        Object.keys(Pins.THREAD_KINDS).map((k) => `<button type="button" class="bd-tkind tk-${k}${tk === k ? ' on' : ''}" aria-pressed="${tk === k}" data-ui="thkind" data-v="${k}"><i aria-hidden="true"></i>${U.esc(Pins.THREAD_KINDS[k].label)}</button>`).join('') +
+        `</div><button type="button" class="sp-chip on" data-sp="linkdone">Klaar</button></div>`;
+    } else {
+      const tCount = Pins.threads(s).length;
+      right = `<div class="bd-meta">` +
+        (mode !== 'matrix' && tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
+        (mode !== 'matrix' && newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
+        hintBtn +
+        `</div>`;
     }
     return `<div class="bd-bar">` +
       `<div class="bd-modes" role="tablist" aria-label="Weergave van het zaakbord">` +
@@ -508,18 +508,30 @@ const Board = {
     }
     return h + `</div>`;
   },
+  // v0.15.0: render discovered schedule tips for a person (empty string if none discovered)
+  schedHtml(s, npcId) {
+    const tips = Mentions.schedOf(s, npcId);
+    if (!tips.length) return '';
+    return `<h4>Ontdekte roostertips</h4><ul class="sched-tips">${tips.map((t) => {
+      const l = World.loc(s, t.locId);
+      const locBtn = l ? `<button type="button" class="mention m-l" data-mention="l:${U.esc(l.id)}">${U.esc(l.name)}</button>` : '?';
+      return `<li>In de <b>${U.esc(PARTS[t.part] || '?')}</b> bij ${locBtn}${t.via ? ` <small>(via ${U.esc(t.via)})</small>` : ''}</li>`;
+    }).join('')}</ul>`;
+  },
   detail(s, id, fam) {
     const k = id === 'case' ? 'case' : id.split(':')[0], ref = id.slice(k.length + 1);
+    const link = (txt) => Mentions.linkHtml(s, txt, { exclude: id });
     let h = '<button type="button" class="sp-x" data-sp="unsel">Sluiten</button>';
     if (k === 'p' && !s.play.met[ref]) {
       const n = World.npc(s, ref), hh = (s.play.heardOf || {})[ref];
-      h += `<div style="float:left;margin:0 12px 6px 0">${this.blank(80)}</div><h3>${U.esc(n.name)}</h3><p>Je kent ${U.esc(U.first(n))} alleen van naam. Genoemd ${U.esc(Mentions.source(s, hh))}.</p>`;
+      h += `<div style="float:left;margin:0 12px 6px 0">${this.blank(80)}</div><h3>${U.esc(n.name)}</h3><p>Je kent ${U.esc(U.first(n))} alleen van naam. Genoemd ${link(Mentions.source(s, hh))}.</p>`;
       h += `<p class="sp-note" style="clear:both">Interessant om uit te zoeken. Vraag rond wie ${U.esc(U.first(n))} is en waar je ${U.pr(n).hem} kunt vinden. Zodra je ${U.pr(n).hem} spreekt, wordt deze kaart actief.</p>`;
+      h += this.schedHtml(s, ref);
       return h + this.tools(s, id);
     }
     if (k === 'o') {
       const l = s.world.locations.find((x) => x.objects.some((o) => o.id === ref)), o = l.objects.find((x) => x.id === ref);
-      h += `<h3>Nog bekijken: ${U.esc(o.name)}</h3><p>Bij ${U.esc(l.name)} viel je iets op aan ${U.esc(o.name)}, maar je wist nog te weinig. Kom terug zodra je meer weet.</p>`;
+      h += `<h3>Nog bekijken: ${U.esc(o.name)}</h3><p>Bij ${link(l.name)} viel je iets op aan ${U.esc(o.name)}, maar je wist nog te weinig. Kom terug zodra je meer weet.</p>`;
       return h + this.tools(s, id);
     }
     if (k === 'l' && !s.play.visited[ref]) {
@@ -538,13 +550,14 @@ const Board = {
       const al = s.alibis && s.alibis[n.id], chk = s.play.alibiCheck && s.play.alibiCheck[n.id];
       if (al && s.play.asked[n.id + ':alibi']) {
         const comp = al.withId ? World.npc(s, al.withId) : null;
-        h += `<h4>Alibi</h4><p>Zegt om ${s.truth.crimeHour} uur in ${U.esc(World.loc(s, al.locId).name)} te zijn geweest, ${comp ? 'met ' + U.esc(comp.name) : 'alleen'}.</p>`;
-        if (chk && Level.get(s).checkLabel) h += `<p class="sp-note">${String(chk.by).indexOf('obj:') === 0 ? 'Bevestigd door een gevonden stuk' : 'Gecontroleerd bij ' + U.esc(World.npc(s, chk.by).name)}: ${chk.ok ? 'klopt' : 'klopt niet'}.</p>`;
+        h += `<h4>Alibi</h4><p>${link('Zegt om ' + s.truth.crimeHour + ' uur in ' + World.loc(s, al.locId).name + ' te zijn geweest, ' + (comp ? 'met ' + comp.name : 'alleen') + '.')}</p>`;
+        if (chk && Level.get(s).checkLabel) h += `<p class="sp-note">${link((String(chk.by).indexOf('obj:') === 0 ? 'Bevestigd door een gevonden stuk' : 'Gecontroleerd bij ' + World.npc(s, chk.by).name) + ': ' + (chk.ok ? 'klopt' : 'klopt niet') + '.')}</p>`;
       }
+      h += this.schedHtml(s, n.id);
       const now = Schedule.at(s, n.id, s.clock.day, s.clock.part);
-      h += `<p class="sp-note">${s.clock.part >= DAY.parts ? 'Het is nacht; iedereen is thuis.' : 'Nu, in de ' + PARTS[s.clock.part] + ': ' + U.esc(World.loc(s, now).name) + '.'}</p>`;
+      h += `<p class="sp-note">${s.clock.part >= DAY.parts ? 'Het is nacht; iedereen is thuis.' : 'Nu, in de ' + PARTS[s.clock.part] + ': ' + link(World.loc(s, now).name) + '.'}</p>`;
     } else if (k === 'case') {
-      h += `<h3>${U.esc(s.meta.title)}</h3><p>${U.esc(s.crime.summary)}</p><p>${U.esc(s.crime.personalHook)}</p><p>${U.esc(s.evidence[0].text)}</p><p class="sp-note">${U.esc(s.meta.settingSummary || '')}</p>`;
+      h += `<h3>${U.esc(s.meta.title)}</h3><p>${link(s.crime.summary)}</p><p>${link(s.crime.personalHook)}</p><p>${link(s.evidence[0].text)}</p><p class="sp-note">${link(s.meta.settingSummary || '')}</p>`;
     } else if (k === 'l') {
       const l = World.loc(s, ref), open = PARTS.slice(0, DAY.parts).filter((x, i) => World.openAt(l, i));
       h += `<h3>${U.esc(l.name)}</h3><p>${U.esc(l.description)}</p><p class="sp-note">Open in de ${open.join(', ') || 'geen enkel dagdeel'}.</p>`;
@@ -552,12 +565,12 @@ const Board = {
       if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button type="button" class="sp-btn" data-sp="visit" data-v="${l.id}">${T.here ? 'Ga naar binnen' : 'Ga erheen (' + T.walk + ' min, aankomst ' + U.hm(T.at) + ')'}</button>`;
     } else if (k === 's' && ref.indexOf('con_') === 0) {
       const c = s.contradictions.find((x) => x.id === ref), n = World.npc(s, c.npcId);
-      h += `<h3>Verklaring van ${U.esc(n.name)}</h3><p>${U.esc(c.claim)}</p>` + (s.play.resolved[c.id] ? `<p class="sp-note">Doorgeprikt.${c.reveal ? ' ' + U.esc(c.reveal) : ''}</p>` : `<p class="sp-note">Nog niet getoetst.</p>`);
+      h += `<h3>Verklaring van ${link(n.name)}</h3><p>${link(c.claim)}</p>` + (s.play.resolved[c.id] ? `<p class="sp-note">Doorgeprikt.${c.reveal ? ' ' + link(c.reveal) : ''}</p>` : `<p class="sp-note">Nog niet getoetst.</p>`);
     } else {
       const e = Evidence.get(s, ref);
-      h += `<h3>${U.esc(e.title)}</h3><p>${U.esc(e.text)}</p>`;
-      if (e.source.type === 'object') { const l = World.loc(s, e.source.locationId); h += `<p class="sp-note">Gevonden: ${U.esc(l.name)}, ${U.esc(l.objects.find((o) => o.id === e.source.objectId).name)}.</p>`; }
-      if (e.source.npcId) h += `<p class="sp-note">Bron: ${U.esc(World.npc(s, e.source.npcId).name)}.</p>`;
+      h += `<h3>${U.esc(e.title)}</h3><p>${link(e.text)}</p>`;
+      if (e.source.type === 'object') { const l = World.loc(s, e.source.locationId); h += `<p class="sp-note">Gevonden: ${link(l.name)}, ${U.esc(l.objects.find((o) => o.id === e.source.objectId).name)}.</p>`; }
+      if (e.source.npcId) h += `<p class="sp-note">Bron: ${link(World.npc(s, e.source.npcId).name)}.</p>`;
       if (s.play.debunked[e.id]) h += '<p class="sp-note">Weerlegd.</p>';
     }
     return h + this.tools(s, id);
@@ -1211,7 +1224,7 @@ const Interrogation = {
       const cls = e.k === 'p' ? 'npc ' + (e.tone || tone) : e.k === 'q' ? 'ask' : e.k === 's' ? 'sys' : 'narr';
       return `<div class="iv-strip ${cls}" data-last="${isLast ? '1' : '0'}">
         <span class="iv-spk">${U.esc(speaker)}</span>
-        <div class="iv-lines">${lines.map((ln, li) => `<p class="iv-line" data-line="${li}">${U.esc(ln)}</p>`).join('')}</div>
+        <div class="iv-lines">${lines.map((ln, li) => `<p class="iv-line" data-line="${li}">${Mentions.linkHtml(s, ln, { exclude: 'p:' + npc.id })}</p>`).join('')}</div>
       </div>`;
     }).join('');
 

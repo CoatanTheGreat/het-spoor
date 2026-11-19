@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- v0.14.0: targeted partial DOM renders, responsive Zaakbord with dynamic underlay threads (Verband/Bevestigd/Vermoeden), personal card marks/notes, Nieuw badges, and leak-free Verdachtenmatrix. Load order matters: content, library, engine, views, ui. -->
+<!-- v0.15.0: clickable mentions with spiekkaart (#peek), discovered schedule tips, optional 3-tier Solver hint ("Geef een zetje"), safe confirmations for big steps, and crisp first-60s onboarding. Load order matters: content, library, engine, views, ui. -->
 <a class="skip-link" href="#main">Ga naar inhoud</a>
 <div id="app" hidden></div>
 <div id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle" hidden>
@@ -19,6 +19,15 @@
       <button type="button" id="mClose">Sluiten</button>
     </div>
     <div id="mBody"></div>
+  </div>
+</div>
+<div id="peek" role="dialog" aria-modal="true" aria-labelledby="pTitle" hidden>
+  <div class="pbox">
+    <div class="phead">
+      <h2 id="pTitle"></h2>
+      <button type="button" id="pClose">Sluiten</button>
+    </div>
+    <div id="pBody"></div>
   </div>
 </div>
 <div id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>

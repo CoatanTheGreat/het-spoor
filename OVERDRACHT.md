@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.14.0)
+# Het Spoor, overdracht (stand v0.15.0)
 
-Dit document hoort bij `het-spoor` (`v0.14.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
+Dit document hoort bij `het-spoor` (`v0.15.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
@@ -19,11 +19,11 @@ Dit document hoort bij `het-spoor` (`v0.14.0`). Het beschrijft wat er gebouwd is
 |---|---|
 | content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen |
 | lib.js | Plot-DNA, naamgeving, wereld en cast |
-| engine.js | Zaakopbouw, regels, acties, bordnotities (`Pins`), solver en tests |
+| engine.js | Zaakopbouw, regels, acties, bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), solver en tests |
 | views.js | Silhouetten, responsief zaakbord, verdachtenoverzicht, kaartgenerator, tableau, verhoor en coach |
-| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, schermen, invoer, modals en debugpaneel |
+| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), bevestigingen, schermen, invoer, modals en debugpaneel |
 
-Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.14.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen` en `player.seenJournal` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
+Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.15.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen`, `player.seenJournal` en `play.knownSched` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `play.knownSched`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
 
 ## Wat er per fase gebouwd is
 
@@ -176,16 +176,39 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.14.0 
 - **Lekvrij Verdachtenoverzicht / Deductiematrix (`Board.matrix`):**
   - Schakelbaar bovenaan het Zaakbord (*Prikbord* / *Verdachtenoverzicht*): toont alleen ontmoete personen op alfabetische volgorde met **beginletter**, **kenmerk**, **ontdekte alibi-status** (respecteert *Moeilijk*), **gekoppelde sporen** en **eigen oordeel + notitie**. Op smalle schermen stapelt de tabel netjes tot leesbare kaarten.
 
+### Fase E, v0.15.0: klikbare namen/plaatsen (spiekkaart), roostertips, 3-traps hint & veilige bevestigingen
+- **Klikbare namen en plaatsen met spiekkaart (`Mentions.linkHtml`, `#peek`, `UI.peek`):**
+  - Namen van betrokkenen (volledige naam of unieke voornaam) en locaties in het verhoortranscript, zaakbord-details, feed (*Zojuist*), Dagboek (alle 4 tabbladen inclusief live zoekresultaten) en hints worden deterministisch en veilig omgezet naar inline `<button class="mention">` zonder deelwoord-matches of HTML-injectie.
+  - Een tik op een verwijzing opent een compacte, lekvrije **spiekkaart** in een eigen dialoog (`#peek`, `z-index: 35`) bovenop `#modal`: klikken vanuit Dagboek houdt het Dagboek open; `Escape` sluit eerst de spiekkaart en herstelt toetsenbordfocus; klikken op een verwijzing in het verhoortranscript opent de spiekkaart zonder `skip-type` te triggeren.
+  - Onbekende (blanco) personen en nog niet bezochte plaatsen lekken nooit rol, kenmerk, woonplek, beschrijving of huidig rooster; vanuit de spiekkaart spring je direct naar het zaakbord, de kaart of (indien open en bereikbaar) het bezoek.
+- **Ontdekte roostertips op persoonskaarten (`Mentions.addSched`, `play.knownSched`, `Board.schedHtml`):**
+  - Roosterhints uit voorwerpen (`World.yieldOf`) en bijfiguren (`Crowd.line`) worden gededupliceerd bewaard in `s.play.knownSched[npcId]` en direct getoond op de persoonskaart (zowel actief als blanco), in de spiekkaart en onder *Dagboek → Mensen*, met klikbare plaatsverwijzingen.
+- **Optionele 3-traps "Geef een zetje"-hint (`Hints.get`, `UI.hintBox`):**
+  - Puur en read-only, op basis van reeds ontdekte sporen en bereikbaarheid (prioriteit: confrontatie → ongecontroleerd alibi → bereikbaar spoor → ontbrekende verklaring → ongesproken betrokkene → klaar om te vergelijken). Lekt nooit `truth.culpritId` of roosters van onbekende personen.
+  - Drie trappen (*1. Richting* → *2. Specifieker* → *3. Verband*), gereset bij elke nieuwe beurt, bereikbaar via *Geef een zetje* op het Zaakbord (op *Makkelijk* en *Normaal*) en als vrijblijvende knop in *Dagboek → Overzicht* (ook opt-in op *Moeilijk*).
+- **Veilige bevestigingen bij grote stappen (`UI.confirm`):**
+  - **Wachten** bevestigt eerst als je meer dan 60 minuten overslaat.
+  - **Dag afsluiten** bevestigt wanneer er nog tijd over is vóór 22:00 of vanaf dag 4 (met waarschuwing dat het spoor daarna afkoelt).
+  - **Aanklacht indienen** in *Zaakverslag* toont eerst een samenvatting van de 3 keuzes, markeert eventuele bevestigde alibi's of weerlegde stukken, herinnert aan de straf bij een foute aanklacht, en keert bij annuleren terug naar het Zaakverslag.
+- **Scherpere eerste 60 seconden (`UI.introHtml`):**
+  - Duidelijke hoofdknop (`Begin direct in [logies] (08:00)`) en korte oriëntatietip over voorwerpen, aanwezigen en klikbare namen/plaatsen.
+
+## Meetwaarden (stand v0.15.0)
+
+- **68 tests, alle groen in Node** (65 bestaand — met `Mentions.linkHtml` en `Hints.get` toegevoegd aan de dader-lektest — + 3 nieuwe regressietests voor `Mentions.linkHtml`, ontdekte roostertips `knownSched` en 3-traps `Hints.get` over 30 seeds).
+- **54/54 headless Chromium-rookchecks groen** (0 console-/runtime-fouten): alle 37 v0.14.0-checks plus 17 nieuwe Fase E-checks (roostertips in detailpaneel, klikbare mentions in Dagboek en verhoortranscript, `#peek` boven `#modal`, `Escape`-prioriteit met focusherstel, 3-traps *Geef een zetje*, en bevestigingsdialogen bij *Dag afsluiten* en *Aanklacht indienen*).
+- Roadmap-status:
+  - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
+  - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
+  - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar (commit `aaf3ab6`)
+  - **Fase E (`v0.15.0`)**: klaar
+  - **Volgende stap — Fase F (`v0.16.0`)**: gestileerde inktlijn-/houtsnede-portretten (0 KB SVG) met expressie per stemming (lekvrij), diepere Tableau-scènes, rustigere stadskaart-badges, voelbare "Aha!"-momenten + in-character reactie bij fout bewijs + uitgebreide 0 KB WebAudio SFX.
+  - **Daarna**: Fase G (interactief Spoorboek, extra twists `dubbel` & `slachtofferliegt`, relatie-effecten, klokbalans met niet-alwetende simulatiespeler) → Fase H (PWA: manifest/icoon/SW, save-migratieketen, geautomatiseerde Playwright/a11y-teststraat).
+
 ## Meetwaarden (stand v0.14.0)
 
 - **65 tests, alle groen in Node** (60 bestaand — met aangepaste responsieve bordtests en `Board.matrix` in de dader-lektest — + 5 nieuwe regressietests voor draadbetekenissen, status-tags/notities, "Nieuw"-badges, Verdachtenoverzicht-lekvrijheid en schema-8 achterwaartse compatibiliteit).
 - **37/37 headless Chromium-rookchecks groen** (0 console-/runtime-fouten): DOM-identiteit en focus-/scrollbehoud bij kaart-, kaartlocatie-, tableau-hotspot- en toonselectie; live `#cardNote`-focus; underlay-SVG-draadjes met `m-bevestigd`/`m-vermoeden` achter kaarten; kaarttekst `>= 14 px` en tikdoelen `>= 44 px`; geen overlap tussen zonelabel en archiefmapje; geen horizontale overloop op desktop (`1280×820`), staande iPad (`768×1024`) en 200% zoom (`640×420`).
-- Roadmap-status:
-  - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
-  - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
-  - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar
-  - **Volgende stap — Fase E (`v0.15.0`)**: klikbare namen/plaatsen via `Mentions` (spiekkaart), ontdekte roostertips op persoonskaarten, optionele 3-traps "Geef een zetje"-hint via `Solver`, bevestiging bij grote stappen (dag afsluiten, aanklacht).
-  - **Daarna**: Fase F (gestileerde inktlijn-/houtsnede-portretten 0 KB SVG met expressie per stemming, diepere Tableau-scènes, rustigere kaartbadges, voelbare "Aha!"-momenten, in-character reactie bij fout bewijs + uitgebreide WebAudio SFX) → Fase G (interactief Spoorboek, extra twists `dubbel` & `slachtofferliegt`, relatie-effecten, klokbalans met niet-alwetende simulatiespeler) → Fase H (PWA: manifest/icoon/SW, save-migratieketen, geautomatiseerde Playwright/a11y-teststraat).
 
 ## Meetwaarden (stand v0.13.0)
 

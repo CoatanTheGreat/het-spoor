@@ -75,7 +75,7 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', lastFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
   _shell: null, _headHtml: null, _stageKey: null, _drawerHtml: null, _drawerId: null, _coachHtml: null, _boardLayout: null, _boardRO: null, _rafThreads: 0, _noteSaveT: null,
   btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
 
@@ -84,6 +84,9 @@ const UI = {
     this.bind();
     $('#mClose').onclick = () => this.close();
     $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') this.close(); });
+    const pc = $('#pClose'), pk = $('#peek');
+    if (pc) pc.onclick = () => this.closePeek();
+    if (pk) pk.addEventListener('click', (e) => { if (e.target.id === 'peek') this.closePeek(); });
     await Store.open();
     Content.init();
     const pack = await Store.get('contentPack');
@@ -113,8 +116,9 @@ const UI = {
   },
   load(s) {
     clearTimeout(this.typeTimer);
+    this.closePeek();
     this.s = s; this.sel = null; this.link = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.feed = [];
-    this.boardMode = 'board'; this.threadKind = 'verband';
+    this.boardMode = 'board'; this.threadKind = 'verband'; this.hintTier = 1; this.hintTurn = -1;
     this.tab = s.visit ? 'visit' : 'board';
     this._stageKey = null; this._headHtml = null; this._drawerHtml = null; this._coachHtml = null;
     $('#app').hidden = false; this.after();
@@ -226,7 +230,7 @@ const UI = {
     moeilijk: 'Geen vraagtekens, geen labels en geen hints. Alleen je dagboek helpt.'
   },
   reduced: () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
-  showStart() { clearTimeout(this.typeTimer); clearTimeout(this.introT); this.close(); this.screen = 'start'; $('#app').hidden = false; this.renderScreen(); },
+  showStart() { clearTimeout(this.typeTimer); clearTimeout(this.introT); this.closePeek(); this.close(); this.screen = 'start'; $('#app').hidden = false; this.renderScreen(); },
   renderScreen(focusRadio) {
     const root = $('#app'); clearTimeout(this.introT);
     this.stopBoardObserver();
@@ -263,8 +267,10 @@ const UI = {
     const s = this.s, start = World.loc(s, s.startLoc), canGo = start && World.openAt(start, s.clock.part) && !s.visit;
     const paras = this.introText(s).map((x, i) => `<p class="co-line${i < (this.introN || 1) ? '' : ' co-hide'}">${U.esc(x)}</p>`).join('');
     return `<main id="main" class="start"><div class="st-folder co"><div class="co-top"><div><h1 class="co-title">${U.esc(s.meta.title)}</h1><p class="co-sub">${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)} · Niveau: ${U.esc(Level.get(s).label)}</p></div><button type="button" class="co-skip-btn" data-ui="st-reveal">Toon hele tekst</button></div>` +
-      `<div class="co-text" data-ui="st-reveal">${paras}</div><div class="co-acts">` +
-      (canGo ? `<button type="button" class="st-go" data-ui="st-go">${s.pos === start.id ? 'Rondkijken in ' : 'Ga naar '}${U.esc(start.name)}</button>` : '') +
+      `<div class="co-text" data-ui="st-reveal">${paras}</div>` +
+      `<p class="co-tip">Tip: onderzoek voorwerpen en spreek aanwezigen aan — je eerste spoor ligt klaar. Tik overal op onderstreepte namen of plaatsen voor een snelle spiekkaart.</p>` +
+      `<div class="co-acts">` +
+      (canGo ? `<button type="button" class="st-go" data-ui="st-go">Begin direct in ${U.esc(start.name)} (${U.hm(Clock.norm(s))})</button>` : '') +
       `<button type="button" class="st-sec${canGo ? '' : ' st-go'}" data-ui="st-board">${canGo ? 'Eerst naar het zaakbord' : 'Naar het zaakbord'}</button></div></div></main>`;
   },
   revealIntro() {
@@ -673,7 +679,7 @@ const UI = {
   },
   dossierReady() { const f = Evidence.found(this.s); return f.some((e) => e.slot === 'motive') && f.some((e) => e.slot === 'method') && !this.s.play.ended; },
   // what just happened: a side drawer on the board and the map, a box in the visit panel
-  feedLines() { return this.feed.slice(-8).map((m) => `<p class="${m.k === 's' ? 'sys' : ''}">${m.who ? '<b>' + U.esc(m.who) + ':</b> ' : ''}${U.esc(m.text)}</p>`).join(''); },
+  feedLines() { const s = this.s; return this.feed.slice(-8).map((m) => `<p class="${m.k === 's' ? 'sys' : ''}">${m.who ? '<b>' + U.esc(m.who) + ':</b> ' : ''}${s ? Mentions.linkHtml(s, m.text) : U.esc(m.text)}</p>`).join(''); },
   feedHtml(cls) {
     if (!this.feed.length) return '';
     if (cls === 'drawer') return `<aside class="sp-drawer sp-feed"><button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}</aside>`;
@@ -756,6 +762,8 @@ const UI = {
     if (this.screenAct(el)) return;
     const d = el.dataset, s = this.s; if (!s) return;
     const harbor = s.world.locations.some((l) => l.template === 'haven');
+    // v0.15.0: handle clickable mentions first so clicking inside .iv-paper never triggers skip-type
+    if (d.mention) { SFX.pin(); return this.peek(d.mention); }
     if (d.card && this.link) {   // v0.11.0 / v0.14.0: pulling threads with optional meaning
       if (d.card === this.link) { SFX.paper(); this.sel = this.link; this.link = null; return this.render(true); }
       if (Act.thread(s, this.link, d.card, this.threadKind)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
@@ -788,6 +796,9 @@ const UI = {
         SFX.pin();
         if (Act.see(s)) Store.put('auto', Save.pack(s));
         return this.render(true);
+      case 'hint':
+        SFX.paper();
+        return this.hintBox();
       case 'mark':
         if (Act.mark(s, d.id, d.v)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
         return this.render(true);
@@ -820,11 +831,44 @@ const UI = {
         return r;
       }
       case 'wait': {
-        const r = this.run((st) => Act.wait(st));
-        if (s.clock.part >= 2) SFX.bell(harbor); else SFX.paper();
-        return r;
+        if (s.visit || s.clock.part >= DAY.parts || s.play.ended) return;
+        const endAt = Clock.partEnd(s.clock.part), skipMin = endAt - Clock.norm(s);
+        const doWait = () => {
+          const r = this.run((st) => Act.wait(st));
+          if (s.clock.part >= 2) SFX.bell(harbor); else SFX.paper();
+          return r;
+        };
+        if (skipMin > 60) {
+          const untilTxt = s.clock.part < 2 ? 'de ' + PARTS[s.clock.part + 1] + ' (' + U.hm(endAt) + ')' : '22:00 (einde van de dag)';
+          return this.confirm({
+            title: 'Tijd overslaan?',
+            body: '<p>Je slaat <b>' + skipMin + ' minuten</b> over tot ' + U.esc(untilTxt) + '.</p><p class="sys">Om ' + U.hm(endAt) + ' ' + (s.clock.part < 2 ? 'gaan de mensen naar hun volgende plek' : 'sluit de stad voor de nacht') + '.</p>',
+            okLabel: 'Ja, wacht tot ' + U.hm(endAt),
+            onOk: doWait
+          });
+        }
+        return doWait();
       }
-      case 'endday': SFX.bell(harbor); return this.run((st) => Act.endDay(st));
+      case 'endday': {
+        if (s.visit || s.clock.part < 2 || s.play.ended) return;
+        const doEnd = () => { SFX.bell(harbor); return this.run((st) => Act.endDay(st)); };
+        const hasTime = s.clock.part < DAY.parts, late = s.clock.day >= DAY.soft;
+        if (hasTime || late) {
+          const left = Math.max(0, DAY.end - Clock.norm(s)), home = World.loc(s, s.startLoc);
+          let body = '';
+          if (hasTime) body += '<p>Je hebt vandaag nog <b>' + left + ' minuten</b> over tot 22:00.</p>';
+          if (late) body += '<p class="confirm-warn">Let op: na dag ' + DAY.soft + ' koelt het spoor af en wordt je eindverslag minder sterk.</p>';
+          body += '<p class="sys">Morgenochtend begin je om 08:00 uitgerust in ' + U.esc(home ? home.name : 'je logies') + '.</p>';
+          return this.confirm({
+            title: 'Dag ' + s.clock.day + ' afsluiten?',
+            body: body,
+            okLabel: 'Ja, sluit dag ' + s.clock.day + ' af',
+            danger: late,
+            onOk: doEnd
+          });
+        }
+        return doEnd();
+      }
       case 'examine': SFX.paper(); this.hot = null; return this.run((st) => Act.examine(st, d.v));
       case 'mingle': SFX.pin(); this.hot = null; return this.run((st) => Act.mingle(st, d.v));
       case 'greet': {
@@ -857,11 +901,19 @@ const UI = {
   },
   bind() {
     if (this.bound) return; this.bound = true; const root = $('#app');
-    const target = (e) => e.target.closest('[data-ui],[data-sp],[data-card],[data-stn],[data-hs]');
+    const target = (e) => e.target.closest('[data-mention],[data-ui],[data-sp],[data-card],[data-stn],[data-hs]');
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-ui="title"]')) { this.taps++; clearTimeout(this.tt); this.tt = setTimeout(() => { this.taps = 0; }, 650); if (this.taps >= 3) { this.taps = 0; Debug.open(); } return; }
       const t = target(e); if (t && t.tagName !== 'SELECT') this.act(t);
     });
+    // v0.15.0: clickable mentions inside modals (#modal) open the spiekkaart (#peek) without closing the modal
+    const mBody = $('#mBody');
+    if (mBody) {
+      mBody.addEventListener('click', (e) => {
+        const mn = e.target.closest('[data-mention]');
+        if (mn && this.s) { e.stopPropagation(); SFX.pin(); this.peek(mn.dataset.mention); }
+      });
+    }
     // live one-line card note editing without re-rendering the drawer or losing input focus
     root.addEventListener('input', (e) => {
       const inp = e.target;
@@ -881,16 +933,18 @@ const UI = {
       if (e.target.dataset.noteId && this.s) { Store.put('auto', Save.pack(this.s)); if (this.boardMode === 'matrix') this.render(true); }
     });
     document.addEventListener('keydown', (e) => {
-      const modal = $('#modal');
-      if (modal && !modal.hidden && e.key === 'Tab') {
-        const focusables = Array.from(modal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null || el.classList.contains('sr-only'));
+      const peek = $('#peek'), modal = $('#modal');
+      const topDlg = (peek && !peek.hidden) ? peek : (modal && !modal.hidden) ? modal : null;
+      if (topDlg && e.key === 'Tab') {
+        const focusables = Array.from(topDlg.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null || el.classList.contains('sr-only'));
         if (focusables.length) {
           const first = focusables[0], last = focusables[focusables.length - 1];
-          if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) { e.preventDefault(); last.focus(); return; }
+          if (e.shiftKey && (document.activeElement === first || !topDlg.contains(document.activeElement))) { e.preventDefault(); last.focus(); return; }
           if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return; }
         }
       }
       if (e.key === 'Escape') {
+        if (peek && !peek.hidden) return this.closePeek();
         if (modal && !modal.hidden) return this.close();
         if (document.activeElement && document.activeElement.id === 'cardNote') { document.activeElement.blur(); return; }
         if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); }
@@ -915,7 +969,7 @@ const UI = {
     window.addEventListener('resize', () => { if (this.screen) return; if (this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads(); const c = this.coachPick(); if (c) this.placeCoach(c); });
   },
 
-  /* ----- modals ----- */
+  /* ----- modals, spiekkaart (#peek), confirmations & hints ----- */
   open(title, html, onClick, opt) {
     const modal = $('#modal'), wasHidden = modal.hidden;
     if (wasHidden) this.lastFocus = document.activeElement;
@@ -930,12 +984,159 @@ const UI = {
     }
   },
   close() {
+    this.closePeek();
     const modal = $('#modal');
     if (modal.hidden) return;
     modal.hidden = true;
     const prev = this.lastFocus;
     this.lastFocus = null;
     if (prev && prev.focus && (prev.isConnected === undefined || prev.isConnected)) prev.focus({ preventScroll: true });
+  },
+  closePeek() {
+    const pk = $('#peek');
+    if (!pk || pk.hidden) return;
+    pk.hidden = true;
+    const prev = this.peekFocus;
+    this.peekFocus = null;
+    if (prev && prev.focus && (prev.isConnected === undefined || prev.isConnected)) prev.focus({ preventScroll: true });
+  },
+  // v0.15.0: compact, leak-free spiekkaart for any clicked person or place mention
+  peek(ref) {
+    const s = this.s, pk = $('#peek'); if (!s || !pk || !ref) return;
+    const fam = famOf(s), k = ref.split(':')[0], id = ref.slice(k.length + 1);
+    const link = (txt) => Mentions.linkHtml(s, txt, { exclude: ref });
+    let title = '', h = '', acts = [];
+    if (k === 'p') {
+      const n = World.npc(s, id); if (!n) return;
+      title = n.name;
+      if (s.play.met[id]) {
+        const tone = Rels.toneOf(s, id), lv = Level.get(s);
+        const mk = Pins.mark(s, ref), note = Pins.note(s, ref);
+        h += `<div class="p-headrow"><div class="p-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 64 })}</div>` +
+          `<div><p class="p-role">${U.esc(n.role)}, ${n.age} jaar</p><p class="sp-note">Doet ${TONE_WORD[tone]} tegen je · houding: ${STANCE_LABEL[TONE_STANCE[tone]]}</p>` +
+          (n.kenmerk ? `<p class="p-km"><b>Kenmerk:</b> ${U.esc(KENMERK[n.kenmerk].desc)}.</p>` : '') + `</div></div>`;
+        const al = s.alibis && s.alibis[id], chk = s.play.alibiCheck && s.play.alibiCheck[id];
+        if (al && s.play.asked[id + ':alibi']) {
+          const comp = al.withId ? World.npc(s, al.withId) : null;
+          h += `<h4>Alibi</h4><p>${link('Zegt om ' + s.truth.crimeHour + ' uur bij ' + World.loc(s, al.locId).name + ' te zijn geweest, ' + (comp ? 'met ' + comp.name : 'alleen') + '.')}</p>`;
+          if (chk && lv.checkLabel) h += `<p class="sp-note">${link((String(chk.by).indexOf('obj:') === 0 ? 'Bevestigd door een gevonden stuk' : 'Gecontroleerd bij ' + World.npc(s, chk.by).name) + ': ' + (chk.ok ? 'klopt' : 'klopt niet') + '.')}</p>`;
+        } else {
+          h += `<p class="sp-note">Alibi nog niet gevraagd.</p>`;
+        }
+        h += Board.schedHtml(s, id);
+        if (mk || note) {
+          h += `<p class="p-my">` + (mk ? `<span class="bc-mark m-${mk}">${Pins.MARKS[mk].icon} ${U.esc(Pins.MARKS[mk].label)}</span> ` : '') + (note ? `<span>${U.esc(note)}</span>` : '') + `</p>`;
+        }
+        const nowLoc = s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, id, s.clock.day, s.clock.part)) : null;
+        if (nowLoc) h += `<p class="sp-note">Nu (${PARTS[s.clock.part]}): ${link(nowLoc.name)}.</p>`;
+        acts.push(`<button type="button" class="chip" data-peek-act="board" data-v="${U.esc(ref)}">Toon op zaakbord</button>`);
+        if (nowLoc) acts.push(`<button type="button" class="chip" data-peek-act="map" data-v="${U.esc(nowLoc.id)}">Toon op kaart</button>`);
+      } else {
+        const hh = (s.play.heardOf || {})[id];
+        h += `<div class="p-headrow"><div class="p-port p-blank">${Board.blank(60)}</div><div><p class="p-role">Nog niet ontmoet</p>` +
+          `<p class="sp-note">${hh ? 'Genoemd ' + link(Mentions.source(s, hh)) + '.' : 'Genoemd in de tekst.'}</p></div></div>`;
+        h += `<p class="sp-note">Je weet nog niet hoe ${U.esc(U.first(n))} eruitziet of wat ${U.pr(n).zijn} rol is. Spreek ${U.pr(n).hem} aan zodra je elkaar treft.</p>`;
+        h += Board.schedHtml(s, id);
+        if (Pins.ok(s, ref)) acts.push(`<button type="button" class="chip" data-peek-act="board" data-v="${U.esc(ref)}">Toon op zaakbord</button>`);
+      }
+    } else if (k === 'l') {
+      const l = World.loc(s, id); if (!l) return;
+      title = l.name;
+      const part = s.clock.part, night = part >= DAY.parts, open = World.openAt(l, part), T = Travel.check(s, id);
+      const allDay = l.open[0] === 0 && l.open[1] === 24;
+      h += `<p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + l.open[0] + ' tot ' + l.open[1] + ' uur.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open (' + PARTS[part] + ').' : 'Nu dicht (' + PARTS[part] + ').'}</p>`;
+      if (s.play.visited[id]) {
+        h += `<p>${U.esc(l.description)}</p>`;
+        if (open && !night) {
+          const known = s.cast.filter((n) => s.play.met[n.id] && Schedule.at(s, n.id, s.clock.day, part) === id).sort(byName);
+          if (known.length) h += `<h4>Bekende aanwezigen (${PARTS[part]})</h4><p>${known.map((n) => `<button type="button" class="mention m-p" data-mention="p:${U.esc(n.id)}">${U.esc(n.name)}</button>`).join(', ')}</p>`;
+        }
+      } else {
+        h += `<p class="sp-note">Je bent hier nog niet geweest.${!T.here ? ' Lopen kost ' + T.walk + ' minuten.' : ''}</p>`;
+      }
+      acts.push(`<button type="button" class="chip" data-peek-act="map" data-v="${U.esc(id)}">Toon op kaart</button>`);
+      if (!s.visit && !s.play.ended && !night && T.open && !T.late) {
+        acts.push(`<button type="button" class="chip hot" data-peek-act="visit" data-v="${U.esc(id)}">${T.here ? 'Ga naar binnen' : 'Ga erheen (' + T.walk + ' min)'}</button>`);
+      }
+    } else return;
+
+    if (acts.length) h += `<div class="p-acts">${acts.join('')}</div>`;
+    if (pk.hidden) this.peekFocus = document.activeElement;
+    $('#pTitle').textContent = title;
+    $('#pBody').innerHTML = h;
+    pk.hidden = false;
+    $('#pBody').scrollTop = 0;
+    $('#pBody').onclick = (e) => {
+      const mn = e.target.closest('[data-mention]');
+      if (mn) { SFX.pin(); return this.peek(mn.dataset.mention); }
+      const actBtn = e.target.closest('[data-peek-act]');
+      if (!actBtn) return;
+      const a = actBtn.dataset.peekAct, v = actBtn.dataset.v;
+      SFX.paper();
+      this.closePeek();
+      this.close();
+      if (a === 'board') {
+        if (Pins.archived(s, v)) { Act.archive(s, v, false); Store.put('auto', Save.pack(s)); }
+        this.tab = 'board'; this.boardMode = 'board'; this.sel = v; this.link = null;
+        if (Act.see(s, v)) Store.put('auto', Save.pack(s));
+        return this.render();
+      }
+      if (a === 'map') {
+        this.tab = 'map'; this.stn = v; this.sel = null; this.link = null;
+        return this.render();
+      }
+      if (a === 'visit') return this.startVisit(v);
+    };
+    const closeBtn = $('#pClose');
+    if (closeBtn && closeBtn.focus) closeBtn.focus({ preventScroll: true });
+  },
+  // v0.15.0: reusable accessible confirmation modal for irreversible / big steps
+  confirm(opt) {
+    const okCls = opt.danger ? 'hot danger' : 'hot';
+    const h = `<div class="confirm-box">${opt.body || ''}<div class="confirm-acts">` +
+      `<button type="button" class="chip" data-cf="cancel">${U.esc(opt.cancelLabel || 'Annuleren')}</button>` +
+      `<button type="button" class="chip ${okCls}" data-cf="ok">${U.esc(opt.okLabel || 'Doorgaan')}</button>` +
+      `</div></div>`;
+    this.open(opt.title || 'Bevestigen', h, (e) => {
+      const b = e.target.closest('[data-cf]'); if (!b) return;
+      if (b.dataset.cf === 'cancel') {
+        SFX.pin();
+        if (opt.onCancel) return opt.onCancel();
+        return this.close();
+      }
+      if (b.dataset.cf === 'ok') {
+        this.close();
+        if (opt.onOk) opt.onOk();
+      }
+    }, { focusSel: '[data-cf="cancel"]' });
+  },
+  // v0.15.0: optional 3-tier "Geef een zetje" modal powered by Hints.get (never leaks culprit)
+  hintBox(tier) {
+    const s = this.s; if (!s || s.play.ended) return;
+    if (this.hintTurn !== s.turn) { this.hintTurn = s.turn; this.hintTier = 1; }
+    if (typeof tier === 'number') this.hintTier = Math.max(1, Math.min(3, tier));
+    const h = Hints.get(s, this.hintTier);
+    if (!h) return;
+    const labels = ['1. Richting', '2. Specifieker', '3. Verband'];
+    const steps = labels.map((lb, idx) => {
+      const n = idx + 1;
+      return `<button type="button" class="hint-step${h.tier === n ? ' on' : n < h.tier ? ' done' : ''}" data-htier="${n}" aria-current="${h.tier === n ? 'step' : 'false'}">${lb}</button>`;
+    }).join('');
+    let body = `<div class="hint-box">` +
+      `<div class="hint-steps" role="group" aria-label="Hint-stappen">${steps}</div>` +
+      `<h3>${U.esc(h.title)}</h3>` +
+      `<p class="hint-txt">${Mentions.linkHtml(s, h.text)}</p>` +
+      `<div class="hint-acts">` +
+        (h.hasNext ? `<button type="button" class="chip hot" data-hnext="${h.tier + 1}">Geef meer detail (trap ${h.tier + 1} van 3)</button>` : '<span class="sys">Dit is het meest concrete zetje voor je huidige sporen.</span>') +
+      `</div>` +
+      `<p class="sys">Deze hulp kijkt alleen naar je gevonden sporen en verraadt nooit wie de dader is. Tik op onderstreepte namen of plaatsen voor een spiekkaart.</p>` +
+      `</div>`;
+    this.open('Geef een zetje', body, (e) => {
+      const nb = e.target.closest('[data-hnext]');
+      if (nb) { SFX.pin(); return this.hintBox(+nb.dataset.hnext); }
+      const sb = e.target.closest('[data-htier]');
+      if (sb) { SFX.pin(); return this.hintBox(+sb.dataset.htier); }
+    });
   },
   // v0.11.0: one archive folder per zone of the board; take a card back, or all of them
   archiveBox(zone) {
@@ -990,46 +1191,60 @@ const UI = {
       tabs.map((t) => '<button type="button" role="tab" aria-selected="' + (tab === t[0]) + '" class="j-tab' + (tab === t[0] ? ' on' : '') + '" data-jtab="' + t[0] + '">' + U.esc(t[1]) + '</button>').join('') +
       '</div><div class="j-panel" role="tabpanel">';
 
+    const renderLogEntries = (query) => {
+      const list = s.log.slice(-80).filter((e) => {
+        if (!query) return true;
+        const who = e.k === 'p' || e.k === 'q' ? World.npc(s, e.npc).name : e.k === 'c' ? e.name : '';
+        return (who + ' ' + e.text).toLowerCase().indexOf(query) >= 0;
+      });
+      return list.map((e) =>
+        e.k === 'p' ? '<p><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(e.npc) + '">' + U.esc(World.npc(s, e.npc).name) + '</button>:</b> ' + Mentions.linkHtml(s, e.text, { exclude: 'p:' + e.npc }) + '</p>' :
+        e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan <button type="button" class="mention m-p" data-mention="p:' + U.esc(e.npc) + '">' + U.esc(U.first(World.npc(s, e.npc))) + '</button>):</b> <i>' + Mentions.linkHtml(s, e.text, { exclude: 'p:' + e.npc }) + '</i></p>' :
+        e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + Mentions.linkHtml(s, e.text) + '</p>' :
+        '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + Mentions.linkHtml(s, e.text) + '</p>'
+      ).join('') || '<p class="sys">Geen regels gevonden voor "' + U.esc(query) + '".</p>';
+    };
+
     if (tab === 'overzicht') {
-      h += '<h3>De zaak</h3><p class="narr">' + U.esc(s.crime.summary) + ' ' + U.esc(s.crime.personalHook) + '</p>';
+      h += '<h3>De zaak</h3><p class="narr">' + Mentions.linkHtml(s, s.crime.summary + ' ' + s.crime.personalHook) + '</p>';
       h += '<div class="j-stats">' +
         '<div class="j-stat"><b>' + foundEv.length + '</b><span>Sporen</span></div>' +
         '<div class="j-stat"><b>' + claims.length + '</b><span>Verklaringen</span></div>' +
         '<div class="j-stat"><b>' + met.length + '</b><span>Mensen gesproken</span></div>' +
         '<div class="j-stat"><b>Dag ' + s.clock.day + '</b><span>' + U.hm(Clock.norm(s)) + ' · ' + PARTS[s.clock.part] + '</span></div>' +
         '</div>';
-      if (s.meta.settingSummary) h += '<h3>De stad</h3><p class="narr">' + U.esc(s.meta.settingSummary) + '</p>';
+      if (!s.play.ended) {
+        const hard = Level.id(s) === 'moeilijk';
+        h += '<div class="j-hint-row"><p class="sys">' + (hard ? 'Op Moeilijk staan hints standaard uit, maar je kunt altijd vrijblijvend een zetje vragen.' : 'Loop je even vast? Vraag een stapsgewijs zetje op basis van je huidige sporen.') + '</p>' +
+          '<button type="button" class="chip" data-jhint="1">' + (hard ? 'Toch een zetje vragen' : 'Geef een zetje') + '</button></div>';
+      }
+      if (s.meta.settingSummary) h += '<h3>De stad</h3><p class="narr">' + Mentions.linkHtml(s, s.meta.settingSummary) + '</p>';
       if (claims.length) {
-        h += '<h3>Open verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b>' + U.esc(World.npc(s, c.npcId).name) + '</b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + U.esc(c.claim) + '</p></div>').join('');
+        h += '<h3>Open verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(c.npcId) + '">' + U.esc(World.npc(s, c.npcId).name) + '</button></b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + Mentions.linkHtml(s, c.claim, { exclude: 'p:' + c.npcId }) + '</p></div>').join('');
       }
     } else if (tab === 'sporen') {
-      h += '<h3>Gevonden sporen</h3>' + (foundEv.map((e) => '<div class="ev ' + (p.debunked[e.id] ? 'debunked' : '') + '"><b>' + U.esc(e.title) + '</b>' + (p.debunked[e.id] ? ' <i>(weerlegd)</i>' : '') + '<p>' + U.esc(e.text) + '</p></div>').join('') || '<p class="sys">Je hebt nog geen sporen gevonden.</p>');
-      if (claims.length) h += '<h3>Verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b>' + U.esc(World.npc(s, c.npcId).name) + '</b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + U.esc(c.claim) + '</p></div>').join('');
+      h += '<h3>Gevonden sporen</h3>' + (foundEv.map((e) => '<div class="ev ' + (p.debunked[e.id] ? 'debunked' : '') + '"><b>' + U.esc(e.title) + '</b>' + (p.debunked[e.id] ? ' <i>(weerlegd)</i>' : '') + '<p>' + Mentions.linkHtml(s, e.text) + '</p></div>').join('') || '<p class="sys">Je hebt nog geen sporen gevonden.</p>');
+      if (claims.length) h += '<h3>Verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(c.npcId) + '">' + U.esc(World.npc(s, c.npcId).name) + '</button></b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + Mentions.linkHtml(s, c.claim, { exclude: 'p:' + c.npcId }) + '</p></div>').join('');
     } else if (tab === 'mensen') {
-      h += '<h3>Betrokkenen</h3>' + (met.map((n) => { const t = Rels.toneOf(s, n.id);
-        return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b>' + U.esc(n.name) + '</b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span></div></div>'; }).join('') || '<p class="sys">Je hebt nog niemand gesproken.</p>');
+      h += '<h3>Betrokkenen</h3>' + (met.map((n) => {
+        const t = Rels.toneOf(s, n.id), tips = Mentions.schedOf(s, n.id);
+        const tipLine = tips.length ? '<br><span class="sys">Roostertip: ' + tips.map((x) => {
+          const l = World.loc(s, x.locId);
+          return PARTS[x.part] + ' bij ' + (l ? '<button type="button" class="mention m-l" data-mention="l:' + U.esc(l.id) + '">' + U.esc(l.name) + '</button>' : '?');
+        }).join(' · ') + '</span>' : '';
+        return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b><button type="button" class="mention m-p" data-mention="p:' + U.esc(n.id) + '">' + U.esc(n.name) + '</button></b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span>' + tipLine + '</div></div>';
+      }).join('') || '<p class="sys">Je hebt nog niemand gesproken.</p>');
       if (figs.length) h += '<h3>Bijfiguren</h3><p class="sys">' + figs.map((c) => U.esc(c.name + ', ' + c.role)).join(' · ') + '</p>';
     } else {
       const q = (this.jQuery || '').trim().toLowerCase();
-      const renderLog = (query) => {
-        const list = s.log.slice(-80).filter((e) => {
-          if (!query) return true;
-          const who = e.k === 'p' || e.k === 'q' ? World.npc(s, e.npc).name : e.k === 'c' ? e.name : '';
-          return (who + ' ' + e.text).toLowerCase().indexOf(query) >= 0;
-        });
-        return list.map((e) =>
-          e.k === 'p' ? '<p><b>' + U.esc(World.npc(s, e.npc).name) + ':</b> ' + U.esc(e.text) + '</p>' :
-          e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan ' + U.esc(U.first(World.npc(s, e.npc))) + '):</b> <i>' + U.esc(e.text) + '</i></p>' :
-          e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + U.esc(e.text) + '</p>' :
-          '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + U.esc(e.text) + '</p>'
-        ).join('') || '<p class="sys">Geen regels gevonden voor "' + U.esc(query) + '".</p>';
-      };
       h += '<div class="j-search"><label for="jSearch" class="sr-only">Zoek in logboek</label><input id="jSearch" type="search" placeholder="Zoek op naam, plaats of woord…" value="' + U.esc(this.jQuery || '') + '"></div>';
-      h += '<div id="jLogList">' + renderLog(q) + '</div>';
+      h += '<div id="jLogList">' + renderLogEntries(q) + '</div>';
     }
     h += '</div>';
 
     this.open('Dagboek', h, (e) => {
+      const hb = e.target.closest('[data-jhint]');
+      if (hb) { SFX.paper(); return this.hintBox(); }
       const tb = e.target.closest('[data-jtab]');
       if (tb) { SFX.pin(); this.jTab = tb.dataset.jtab; this.journal({ focusSel: '[data-jtab="' + this.jTab + '"]' }); }
     }, opt);
@@ -1038,18 +1253,7 @@ const UI = {
       inp.oninput = () => {
         this.jQuery = inp.value;
         const box = $('#jLogList'); if (!box) return;
-        const q2 = inp.value.trim().toLowerCase();
-        const list = s.log.slice(-80).filter((e) => {
-          if (!q2) return true;
-          const who = e.k === 'p' || e.k === 'q' ? World.npc(s, e.npc).name : e.k === 'c' ? e.name : '';
-          return (who + ' ' + e.text).toLowerCase().indexOf(q2) >= 0;
-        });
-        box.innerHTML = list.map((e) =>
-          e.k === 'p' ? '<p><b>' + U.esc(World.npc(s, e.npc).name) + ':</b> ' + U.esc(e.text) + '</p>' :
-          e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan ' + U.esc(U.first(World.npc(s, e.npc))) + '):</b> <i>' + U.esc(e.text) + '</i></p>' :
-          e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + U.esc(e.text) + '</p>' :
-          '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + U.esc(e.text) + '</p>'
-        ).join('') || '<p class="sys">Geen regels gevonden voor "' + U.esc(q2) + '".</p>';
+        box.innerHTML = renderLogEntries(inp.value.trim().toLowerCase());
       };
     }
   },
@@ -1057,9 +1261,9 @@ const UI = {
   alibiNote(s, n) {
     const a = s.alibis && s.alibis[n.id]; if (!a || !s.play.asked[n.id + ':alibi']) return '';
     const comp = a.withId ? World.npc(s, a.withId) : null, chk = s.play.alibiCheck && s.play.alibiCheck[n.id];
-    let t = ' Alibi: ' + World.loc(s, a.locId).name + (comp ? ', met ' + U.first(comp) : ', alleen') + '.';
-    if (chk) t += String(chk.by).indexOf('obj:') === 0 ? ' Een stuk bevestigt het.' : ' ' + U.first(World.npc(s, chk.by)) + (chk.ok ? ' bevestigt het.' : ' spreekt het tegen.');
-    return U.esc(t);
+    let t = ' Alibi: ' + World.loc(s, a.locId).name + (comp ? ', met ' + comp.name : ', alleen') + '.';
+    if (chk && Level.get(s).checkLabel) t += String(chk.by).indexOf('obj:') === 0 ? ' Een stuk bevestigt het.' : ' ' + World.npc(s, chk.by).name + (chk.ok ? ' bevestigt het.' : ' spreekt het tegen.');
+    return Mentions.linkHtml(s, t, { exclude: 'p:' + n.id });
   },
   dossier() {
     const s = this.s, d = s.player.dossier, f = Evidence.found(s), fam = famOf(s);
@@ -1146,7 +1350,30 @@ const UI = {
       const slotBtn = e.target.closest('[data-zslot]');
       if (slotBtn) { this.zvSlot = slotBtn.dataset.zslot; return this.dossier(); }
       const t = e.target.closest('button[data-f]'); if (!t || s.play.ended) return;
-      if (t.dataset.f === 'accuse') { if (!ready) return this.toast('Het zaakverslag is nog niet compleet.'); SFX.seal(); this.close(); return this.run((st) => Act.accuse(st)); }
+      if (t.dataset.f === 'accuse') {
+        if (!ready) return this.toast('Het zaakverslag is nog niet compleet.');
+        const warns = [];
+        if (s.play.cleared[sus.id] && Level.get(s).checkLabel) warns.push('Het alibi van ' + sus.name + ' staat als bevestigd genoteerd.');
+        if (s.play.debunked[mot.id]) warns.push('"' + mot.title + '" is eerder weerlegd.');
+        if (s.play.debunked[met.id]) warns.push('"' + met.title + '" is eerder weerlegd.');
+        const body = `<p>Controleer je aanklacht voordat je ondertekent:</p>` +
+          `<ul class="confirm-list">` +
+            `<li><span>Verdachte:</span> <b>${U.esc(sus.name)}</b></li>` +
+            `<li><span>Motief-bewijs:</span> <b>${U.esc(mot.title)}</b></li>` +
+            `<li><span>Werkwijze-bewijs:</span> <b>${U.esc(met.title)}</b></li>` +
+          `</ul>` +
+          (warns.length ? `<p class="confirm-warn">${warns.map(U.esc).join(' ')}</p>` : '') +
+          `<p class="sys">Een onjuiste aanklacht kost vertrouwen in de stad én de rest van het dagdeel.</p>`;
+        return this.confirm({
+          title: 'Aanklacht indienen?',
+          body: body,
+          okLabel: 'Ja, dien aanklacht in',
+          cancelLabel: 'Terug naar zaakverslag',
+          danger: warns.length > 0,
+          onCancel: () => this.dossier(),
+          onOk: () => { SFX.seal(); this.run((st) => Act.accuse(st)); }
+        });
+      }
       const field = t.dataset.f, nextVal = d[field] === t.dataset.v ? null : t.dataset.v;
       Act.setDossier(s, field, nextVal);
       if (nextVal) {
