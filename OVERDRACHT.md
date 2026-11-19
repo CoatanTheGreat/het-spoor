@@ -1,15 +1,15 @@
-# Het Spoor, overdracht (stand v0.13.0)
+# Het Spoor, overdracht (stand v0.14.0)
 
-Dit document hoort bij `het-spoor` (`v0.13.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
+Dit document hoort bij `het-spoor` (`v0.14.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
 - Advies- en reviewvragen volgen route B: Onderwerp, Persona, Antwoord, Toelichting en de Gecontroleerd-regel.
 - Eerst voorstellen, pas bouwen na akkoord.
-- Elke fase levert alle gewijzigde bestanden compleet op, als zip-bestand.
+- Het spel blijft 100% vanilla HTML/CSS/JS zonder buildstap, volledig offline, speelbaar voor 12 tot 70 jaar.
 - Testen gaat met de ingebouwde testsuite (`Tests.run(30)` in de browserconsole, of via het debugpaneel: drie keer op de titel klikken in het spel).
 - De testsuite draait ook in Node: laad `content.js`, `lib.js`, `engine.js` en `views.js` in één `vm`-context, met een kleine `document`-stub (`querySelector` en `getElementById` geven `null`).
-- Doelplatform: desktop en iPad liggend. Een staande iPad krijgt een draai-melding.
+- Doelplatform: desktop, iPad (liggend én staand) en smalle schermen (ook bij 200% browserzoom).
 
 ## Bestanden en laadvolgorde
 
@@ -20,10 +20,10 @@ Dit document hoort bij `het-spoor` (`v0.13.0`). Het beschrijft wat er gebouwd is
 | content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen |
 | lib.js | Plot-DNA, naamgeving, wereld en cast |
 | engine.js | Zaakopbouw, regels, acties, bordnotities (`Pins`), solver en tests |
-| views.js | Silhouetten, zaakbord, kaartgenerator, tableau, verhoor en coach |
-| ui.js | Startscherm, koude opening, schermen, invoer, modals en debugpaneel |
+| views.js | Silhouetten, responsief zaakbord, verdachtenoverzicht, kaartgenerator, tableau, verhoor en coach |
+| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, schermen, invoer, modals en debugpaneel |
 
-Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.12.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie en een lijst genoemde personen en plaatsen uit het logboek. Nieuwe velden (`player.threads`, `player.archive`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`) zijn optioneel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
+Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.14.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen` en `player.seenJournal` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
 
 ## Wat er per fase gebouwd is
 
@@ -160,19 +160,40 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.12.0 
   - Relatiebalken en bezoekklokbalk zijn echte `role="progressbar"`-elementen met zichtbare getallen; toetsenbord-toegankelijke bestandsinputs (`.sr-only`), `radiogroup`-pijltjestoetsen zonder focusdiefstal, echte *"Alles direct tonen"* / *"Toon hele tekst"*-knoppen en duidelijke focusringen op kaart/tableau.
   - Harde `#rotate`-blokkade verwijderd (WCAG 1.3.4): zijladen, tableau en verhoorscherm schalen nu netjes mee op staande iPad en smalle schermen.
 
+### Fase C (rest) + Fase D, v0.14.0: gerichte DOM-deelrenders, responsief Zaakbord & Verdachtenmatrix
+- **Gerichte DOM-deelrenders (`ui.js`):**
+  - Persistente spelschil (`<header>`, `<main>` met `.sp-stage` + `<aside class="sp-drawer">`, en `.sp-coach-layer`): onveranderde regio's worden nooit opnieuw opgebouwd.
+  - In-place patchers (`patchBoardSelection`, `patchMapSelection`, `patchTableauHotspot`, `patchIvApproach`) behouden toetsenbordfocus, scrollpositie en soepele CSS-overgangen, en voorkomen her-parsing van zware SVG's (`MapGen.svg`, `Tableau.svg`) bij kaart-, locatie-, hotspot- of toonselectie.
+- **Responsief Zaakbord (`views.js`, `style.css`, `ui.js`):**
+  - Vaste `1280 × 810` `transform: scale()`-canvas en `UI.fit()` volledig vervangen door een responsief CSS Grid + Container Queries-zaakbord (`>= 14 px` tekst, `>= 44 px` tikdoelen, schaalt zonder horizontale overloop op desktop, staande iPad en bij 200% browserzoom).
+  - Alle niet-gearchiveerde kaarten blijven zichtbaar (geen kunstmatige afkap-overloopkaarten meer); archiefmapjes staan via flexbox in `.zn-head` naast elk zonelabel.
+- **Dynamische draadjes achter kaarten met optionele betekenis (`engine.js`, `views.js`, `ui.js`):**
+  - SVG-onderlaag (`svg.bt`, `z-index: 1` onder `.bd-grid`, `z-index: 2`) meet werkelijke kaartposities via `getBoundingClientRect` en werkt automatisch bij via `ResizeObserver` en bij tekstgrootte-/vensterwijzigingen.
+  - Eigen draadjes ondersteunen 3 betekenissen: **Verband** (rood, standaard), **Bevestigd** (groen) en **Vermoeden** (oker, gestippeld), met achterwaartse compatibiliteit in `player.threads` (`[a, b]` of `[a, b, kind]`).
+- **Eigen status-tags, korte notities & "Nieuw"-badges (`engine.js`, `views.js`, `ui.js`):**
+  - Op elke kaart (behalve de zaakkaart) kun je eigen markeringen zetten (**Verdacht**, **Onschuldig**, **Nog checken**) met kleur + icoon, en op elke kaart een korte 1-regelige eigen notitie typen (live bijgewerkt zonder focusverlies in `#cardNote`).
+  - "Nieuw"-badges (`+N` op tabblad *Zaakbord* en knop *Dagboek*, en `Nieuw`-label op nieuwe of actief geworden kaarten) verdwijnen zodra je de kaart aanklikt, op *Alles gezien* tikt, of het tabblad verlaat.
+- **Lekvrij Verdachtenoverzicht / Deductiematrix (`Board.matrix`):**
+  - Schakelbaar bovenaan het Zaakbord (*Prikbord* / *Verdachtenoverzicht*): toont alleen ontmoete personen op alfabetische volgorde met **beginletter**, **kenmerk**, **ontdekte alibi-status** (respecteert *Moeilijk*), **gekoppelde sporen** en **eigen oordeel + notitie**. Op smalle schermen stapelt de tabel netjes tot leesbare kaarten.
+
+## Meetwaarden (stand v0.14.0)
+
+- **65 tests, alle groen in Node** (60 bestaand — met aangepaste responsieve bordtests en `Board.matrix` in de dader-lektest — + 5 nieuwe regressietests voor draadbetekenissen, status-tags/notities, "Nieuw"-badges, Verdachtenoverzicht-lekvrijheid en schema-8 achterwaartse compatibiliteit).
+- **37/37 headless Chromium-rookchecks groen** (0 console-/runtime-fouten): DOM-identiteit en focus-/scrollbehoud bij kaart-, kaartlocatie-, tableau-hotspot- en toonselectie; live `#cardNote`-focus; underlay-SVG-draadjes met `m-bevestigd`/`m-vermoeden` achter kaarten; kaarttekst `>= 14 px` en tikdoelen `>= 44 px`; geen overlap tussen zonelabel en archiefmapje; geen horizontale overloop op desktop (`1280×820`), staande iPad (`768×1024`) en 200% zoom (`640×420`).
+- Roadmap-status:
+  - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
+  - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
+  - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar
+  - **Volgende stap — Fase E (`v0.15.0`)**: klikbare namen/plaatsen via `Mentions` (spiekkaart), ontdekte roostertips op persoonskaarten, optionele 3-traps "Geef een zetje"-hint via `Solver`, bevestiging bij grote stappen (dag afsluiten, aanklacht).
+  - **Daarna**: Fase F (gestileerde inktlijn-/houtsnede-portretten 0 KB SVG met expressie per stemming, diepere Tableau-scènes, rustigere kaartbadges, voelbare "Aha!"-momenten, in-character reactie bij fout bewijs + uitgebreide WebAudio SFX) → Fase G (interactief Spoorboek, extra twists `dubbel` & `slachtofferliegt`, relatie-effecten, klokbalans met niet-alwetende simulatiespeler) → Fase H (PWA: manifest/icoon/SW, save-migratieketen, geautomatiseerde Playwright/a11y-teststraat).
+
 ## Meetwaarden (stand v0.13.0)
 
 - 60 tests, alle groen in Node + UI-rookchecks (prefs-dataset, enkele header + `<main>`, 4 Dagboek-tabs, Systeem-weergave, `.sr-only` bestandsinputs, modal-sluiten).
-- Roadmap-status:
-  - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
-  - **Fase B (`v0.13.0`) + deel Fase C (a11y/modals/landmarks/staand scherm)**: klaar
-  - **Volgende stap — Fase C (rest) + Fase D (`v0.14.0`)**: gerichte DOM-deelrenders (geen volledige `#app.innerHTML`-herbouw, focus- en scrollbehoud) + nieuw responsief Zaakbord (echte leesbare grootte >= 44 px, dynamische draadjes achter kaarten met kleur/label, eigen status-tags/notities, "Nieuw"-badges en Verdachtenmatrix)
-  - **Daarna**: Fase E (klikbare namen, roostertips, 3-traps hints, veilige bevestigingen) → Fase F (inktlijn-portretten, diepere scènes, rustigere kaart, game feel & audio) → Fase G (interactief Spoorboek, extra twists, relaties, balans) → Fase H (PWA, save-migraties, Playwright/a11y-teststraat).
 
 ## Meetwaarden (stand v0.12.1)
 
 - 60 tests, alle groen in Node (56 bestaand + 4 nieuwe regressietests voor `Board.linked`, archief-terugkeer, tableau-overloop en donkere kaartvariabelen), plus UI-rookchecks voor `UI.archiveBox` en `UI.startVisit`.
-- Roadmap voor vervolgfasen (akkoord van eigenaar): **Fase A (klaar)** → **Fase B** (design-systeem, stijl, bovenbalk, tekstgrootte, Dagboek-tabs) → **Fase C** (a11y, deel-renders, staande weergave) → **Fase D** (responsief zaakbord, kleurdraadjes, verdachtenmatrix) → **Fase E** (klikbare namen, roostertips, hints, bevestigingen) → **Fase F** (inktlijn-portretten, scènes, kaart, game feel) → **Fase G** (Spoorboek, twists, balans) → **Fase H** (PWA, save-migraties, UI-teststraat).
 
 ## Meetwaarden (stand v0.12.0)
 
@@ -201,14 +222,9 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.12.0 
 ## Wat nog openstaat
 
 ### Afstemming
-- De tijdsdruk is lichter geworden. Speel een paar zaken na en stel zo nodig `COST` of de lengte van de dag bij. Een vaste simulatiespeler die niet alwetend is, zou dit meetbaar maken.
+- De tijdsdruk is lichter geworden. Speel een paar zaken na en stel zo nodig `COST` of de lengte van de dag bij. Een vaste simulatiespeler die niet alwetend is, staat gepland in Fase G.
 
-### Nog na te lopen in de browser
-- Het bord en de kaart zijn in deze fase niet in een echte browser bekeken, alleen in Node, jsdom en als losse kaartafbeelding. Let vooral op de breedte van de zonelabels naast de archiefmapjes en op de leesbaarheid van de kaart in het donkere thema.
-- "3+" staat nu naast drie vraagtekens. Moet het één label "3+" zonder vraagtekens zijn, dan zit dat in `MapGen.unknownBadges`.
-
-### Bekende beperkingen
-- Een foute bewijskaart in de confrontatie geeft alleen een melding.
-- De twist "dubbele misdaad" uit de plot-DNA heeft nog geen spelmechaniek.
-- Draadjes lopen soms over andere kaarten heen, zeker nu je ze vrij kunt trekken.
-- Het bord is 810 hoog in plaats van 720. Op een iPad liggend wordt het daardoor ongeveer 5% kleiner geschaald.
+### Nog op te pakken in vervolgfasen
+- "3+" op de stadskaart en drukke locatie-badges worden rustiger gemaakt in Fase F (`MapGen.unknownBadges`).
+- Een foute bewijskaart in de confrontatie geeft nu alleen een toast-melding (in-character reactie in Fase F).
+- De twists `dubbel` en `slachtofferliegt` uit de plot-DNA krijgen hun spelmechaniek in Fase G.

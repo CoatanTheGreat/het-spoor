@@ -208,47 +208,42 @@ const SpikeData = {
   }
 };
 
-/* ---------------- Board: deterministic zones, cards and threads (bewijsgraaf) ---------------- */
+/* ---------------- Board (v0.14.0): responsive corkboard, dynamic threads, marks/notes & suspect matrix ---------------- */
 const Board = {
-  W: 1280, H: 810,
-  // v0.10.0 (voorstel 15): fixed grid. The labels own a header strip of 44 px; cards start at y 56 and keep at least 20 px apart.
-  // v0.11.0: a strip of visited places along the bottom, with its own label row; every zone has an archive folder
-  ZONES: [['Mensen', 30, 8, 'person'], ['De zaak en de stukken', 474, 8, 'doc'], ['Verklaringen', 850, 8, 'stmt'], ['Plaatsen', 30, 710, 'place']],
-  labelW: (z) => z[0].length * 10 + 24,
-  // wider cards turn less, so their corners never swing into a neighbour (406 px: at most 0,6 degree)
-  rot: (id, w) => { const max = Math.min(1.6, 240 / (w || 160)); return +((((parseInt(RNG.hashStr('rot|' + id), 36) % 33) - 16) / 16) * max).toFixed(2); },
-  grid(x0, y0, cols, rows, w, h, gx, gy) { const out = []; for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push({ x: x0 + c * (w + gx), y: y0 + r * (h + gy), w: w, h: h }); return out; },
-  SLOTS: null,
-  slots() {
-    return this.SLOTS || (this.SLOTS = { person: this.grid(30, 56, 2, 4, 200, 144, 20, 20), case: { x: 474, y: 56, w: 352, h: 170 },
-      doc: this.grid(474, 246, 2, 3, 166, 132, 20, 20), stmt: this.grid(850, 56, 1, 8, 404, 62, 0, 20), place: this.grid(30, 756, 7, 1, 160, 38, 18, 0) });
-  },
-  // the folder button sits in the label row, right after the label; only when something is in it
+  // v0.14.0: responsive zones rendered in real readable scale (no fixed 1280x810 transform:scale canvas)
+  ZONES: [
+    { key: 'person', label: 'Mensen', empty: 'Spreek mensen aan om hun kaart hier te zien.' },
+    { key: 'doc',    label: 'De zaak en de stukken', empty: 'Onderzoek voorwerpen om sporen te verzamelen.' },
+    { key: 'stmt',   label: 'Verklaringen', empty: 'Verhoor betrokkenen; opvallende verklaringen verschijnen hier.' },
+    { key: 'place',  label: 'Plaatsen', empty: 'Bezochte en genoemde plekken verschijnen hier.' }
+  ],
+  // gentle deterministic tilt (capped to ±0.8 deg so cards stay crisp and easy to read)
+  rot: (id) => +((((parseInt(RNG.hashStr('rot|' + id), 36) % 17) - 8) / 10)).toFixed(2),
   folders(s) {
-    return this.ZONES.map((z) => ({ zone: z[3], n: Pins.inFolder(s, z[3]).length, x: z[1] + this.labelW(z) + 14, y: z[2] + 1, w: 112, h: 30 })).filter((f) => f.n > 0);
+    return this.ZONES.map((z) => ({ zone: z.key, n: Pins.inFolder(s, z.key).length })).filter((f) => f.n > 0);
   },
   layout(s) {
-    const p = s.play, cards = [], threads = [], add = (c) => { c.rot = this.rot(c.id, c.w); cards.push(c); }, S = this.slots(), A = (s.player && s.player.archive) || {}, live = (it) => !A[it.id];
-    // more items than slots: the last slot becomes an overflow card that opens the journal, so nothing drops out silently
-    const fill = (items, slots, zone, one, many) => {
-      items = items.filter(live);
-      const over = items.length > slots.length, shown = over ? items.slice(0, slots.length - 1) : items;
-      shown.forEach((it, i) => add(Object.assign(it, slots[i])));
-      if (over) { const n = items.length - shown.length; add(Object.assign({ id: 'more:' + zone, kind: 'more', zone: zone, n: n, word: n === 1 ? one : many }, slots[slots.length - 1])); }
-    };
-    // v0.12.0: people you only heard of follow as blank cards, so an overflow hides them first
+    const p = s.play, cards = [], threads = [], zones = { person: [], doc: [], stmt: [], place: [] };
+    const A = (s.player && s.player.archive) || {}, live = (it) => !A[it.id];
+    const add = (z, it) => { const c = Object.assign({ zone: z, rot: this.rot(it.id) }, it); cards.push(c); zones[z].push(c); };
     const hO = p.heardOf || {}, hL = p.heardOfLoc || {};
-    fill(s.cast.filter((n) => p.met[n.id]).sort(byName).map((n) => ({ id: 'p:' + n.id, kind: 'person', ref: n.id }))
-      .concat(s.cast.filter((n) => !p.met[n.id] && hO[n.id]).sort(byName).map((n) => ({ id: 'p:' + n.id, kind: 'ghost', ref: n.id }))), S.person, 'person', 'persoon', 'mensen');
-    add(Object.assign({ id: 'case', kind: 'case', ref: s.evidence[0].id }, S.case));
+    // v0.12.0: people you only heard of follow after met people as blank cards
+    s.cast.filter((n) => p.met[n.id]).sort(byName).map((n) => ({ id: 'p:' + n.id, kind: 'person', ref: n.id }))
+      .concat(s.cast.filter((n) => !p.met[n.id] && hO[n.id]).sort(byName).map((n) => ({ id: 'p:' + n.id, kind: 'ghost', ref: n.id })))
+      .filter(live).forEach((it) => add('person', it));
+    add('doc', { id: 'case', kind: 'case', ref: s.evidence[0].id });
     const found = Evidence.found(s).filter((e) => e.route !== 'start');
     const marked = s.world.locations.reduce((a, l) => a.concat(l.objects.filter((o) => Pins.ok(s, 'o:' + o.id)).map((o) => ({ id: 'o:' + o.id, kind: 'ghostdoc', ref: o.id, loc: l.id }))), []).sort((a, b) => a.id < b.id ? -1 : 1);
-    fill(found.filter((e) => e.source.type === 'object').map((e) => ({ id: 'd:' + e.id, kind: 'doc', ref: e.id })).concat(marked), S.doc, 'doc', 'stuk', 'stukken');
-    fill(s.contradictions.filter((c) => p.heard[c.id]).map((c) => ({ id: 's:' + c.id, kind: 'claim', ref: c.id }))
-      .concat(found.filter((e) => e.source.type !== 'object').map((e) => ({ id: 's:' + e.id, kind: 'talk', ref: e.id }))), S.stmt, 'stmt', 'verklaring', 'verklaringen');
-    fill(s.world.locations.filter((l) => p.visited[l.id] || hL[l.id]).sort(byName).map((l) => ({ id: 'l:' + l.id, kind: p.visited[l.id] ? 'place' : 'ghostplace', ref: l.id })), S.place, 'place', 'plaats', 'plaatsen');
+    found.filter((e) => e.source.type === 'object').map((e) => ({ id: 'd:' + e.id, kind: 'doc', ref: e.id })).concat(marked)
+      .filter(live).forEach((it) => add('doc', it));
+    s.contradictions.filter((c) => p.heard[c.id]).map((c) => ({ id: 's:' + c.id, kind: 'claim', ref: c.id }))
+      .concat(found.filter((e) => e.source.type !== 'object').map((e) => ({ id: 's:' + e.id, kind: 'talk', ref: e.id })))
+      .filter(live).forEach((it) => add('stmt', it));
+    s.world.locations.filter((l) => p.visited[l.id] || hL[l.id]).sort(byName).map((l) => ({ id: 'l:' + l.id, kind: p.visited[l.id] ? 'place' : 'ghostplace', ref: l.id }))
+      .filter(live).forEach((it) => add('place', it));
+
     const has = (id) => cards.some((c) => c.id === id), cardOf = (eid) => has('d:' + eid) ? 'd:' + eid : has('s:' + eid) ? 's:' + eid : null;
-    // v0.7.0 (voorstel 3): Makkelijk draws the threads from the evidence; v0.11.0: everyone draws their own as well
+    // v0.7.0: Makkelijk draws automatic threads from evidence; v0.11.0 / v0.14.0: everyone draws their own with optional meaning
     const L = Level.get(s);
     if (L.threads) found.forEach((e) => { const a = cardOf(e.id), to = e.pointsTo; if (a && to && has('p:' + to)) threads.push({ a: a, b: 'p:' + to, kind: p.debunked[e.id] ? 'dead' : 'points' }); });
     s.contradictions.forEach((c) => {
@@ -256,27 +251,34 @@ const Board = {
       if (ce && (p.resolved[c.id] || L.clash)) threads.push({ a: 's:' + c.id, b: ce, kind: p.resolved[c.id] ? 'solved' : 'clash' });
       if (has('p:' + c.npcId)) threads.push({ a: 's:' + c.id, b: 'p:' + c.npcId, kind: 'said' });
     });
-    // your own threads; one that the board already draws (not a 'said' line) is not drawn twice
-    Pins.threads(s).forEach((t) => { if (has(t[0]) && has(t[1]) && !threads.some((x) => x.kind !== 'said' && Pins.key(x.a, x.b) === Pins.key(t[0], t[1]))) threads.push({ a: t[0], b: t[1], kind: 'mine' }); });
-    return { cards: cards, threads: threads };
+    Pins.threads(s).forEach((t) => {
+      if (has(t[0]) && has(t[1]) && !threads.some((x) => x.kind !== 'said' && Pins.key(x.a, x.b) === Pins.key(t[0], t[1]))) {
+        threads.push({ a: t[0], b: t[1], kind: 'mine', meaning: Pins.threadKind(t) });
+      }
+    });
+    return { cards: cards, zones: zones, threads: threads };
   },
-  pin: (c) => [c.x + c.w / 2, c.y + 9],
-  // where a thread meets a card: the edge that faces the other card; same column -> just outside the right edge
-  // v0.11.0: a place in the bottom strip meets a card above it on its top edge, and the card meets it on its bottom edge
-  anchor(c, o) {
-    if (o.x >= c.x + c.w - 4) return [c.x + c.w - 5, c.y + c.h / 2];
-    if (o.x + o.w <= c.x + 4) return [c.x + 5, c.y + c.h / 2];
-    const pl = (x) => x.kind === 'place' || x.kind === 'ghostplace';
-    if ((pl(c) || pl(o)) && o.y >= c.y + c.h) return [c.x + c.w / 2, c.y + c.h - 4];
-    if ((pl(c) || pl(o)) && o.y + o.h <= c.y) return [c.x + c.w / 2, c.y + 4];
-    return [c.x + c.w + 12, c.y + c.h / 2];
+  // dynamic anchor on the edge of card rect a facing card rect b (used by UI.drawThreads with getBoundingClientRect)
+  anchorRect(a, b) {
+    if (b.x >= a.x + a.w - 8) return [a.x + a.w - 2, a.y + a.h / 2];
+    if (b.x + b.w <= a.x + 8) return [a.x + 2, a.y + a.h / 2];
+    if (b.y >= a.y + a.h - 8) return [a.x + a.w / 2, a.y + a.h - 2];
+    if (b.y + b.h <= a.y + 8) return [a.x + a.w / 2, a.y + 2];
+    return [a.x + a.w - 2, a.y + a.h / 2];
   },
   path(a, b, kind) {
-    const x1 = a[0], y1 = a[1], x2 = b[0], y2 = b[1], d = Math.hypot(x2 - x1, y2 - y1);
-    if (kind !== 'clash' && kind !== 'solved') { const sag = Math.min(70, d * 0.14); return `M${x1} ${y1} Q${(x1 + x2) / 2} ${(y1 + y2) / 2 + sag} ${x2} ${y2}`; }
-    const n = Math.max(4, Math.round(d / 16)), ux = (x2 - x1) / d, uy = (y2 - y1) / d; let s = `M${x1} ${y1}`;
-    for (let i = 1; i < n; i++) { const k = i / n, o = (i % 2 ? 7 : -7); s += ` L${(x1 + (x2 - x1) * k - uy * o).toFixed(1)} ${(y1 + (y2 - y1) * k + ux * o).toFixed(1)}`; }
-    return s + ` L${x2} ${y2}`;
+    const x1 = a[0], y1 = a[1], x2 = b[0], y2 = b[1], d = Math.hypot(x2 - x1, y2 - y1) || 1;
+    if (kind !== 'clash' && kind !== 'solved') {
+      const sag = Math.min(54, d * 0.12);
+      return `M${x1.toFixed(1)} ${y1.toFixed(1)} Q${((x1 + x2) / 2).toFixed(1)} ${((y1 + y2) / 2 + sag).toFixed(1)} ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+    }
+    const n = Math.max(4, Math.round(d / 18)), ux = (x2 - x1) / d, uy = (y2 - y1) / d;
+    let out = `M${x1.toFixed(1)} ${y1.toFixed(1)}`;
+    for (let i = 1; i < n; i++) {
+      const k = i / n, o = (i % 2 ? 6 : -6);
+      out += ` L${(x1 + (x2 - x1) * k - uy * o).toFixed(1)} ${(y1 + (y2 - y1) * k + ux * o).toFixed(1)}`;
+    }
+    return out + ` L${x2.toFixed(1)} ${y2.toFixed(1)}`;
   },
   // cards that belong together; used for highlighting a person, document or place
   linked(s, L, id) {
@@ -292,62 +294,219 @@ const Board = {
   },
   // a neutral head-and-shoulders outline; the same for everyone, so it never gives anything away
   blank: (w) => `<svg viewBox="0 0 92 108" width="${w}" height="${Math.round(w * 108 / 92)}" aria-hidden="true"><circle cx="46" cy="38" r="20" fill="none" stroke="#6f6d64" stroke-width="3" stroke-dasharray="5 4"/><path d="M10 108 C12 78 28 66 46 66 C64 66 80 78 82 108" fill="none" stroke="#6f6d64" stroke-width="3" stroke-dasharray="5 4"/><text x="46" y="45" text-anchor="middle" font-size="20" font-weight="700" fill="#6f6d64">?</text></svg>`,
-  card(s, c, fam) {
-    const F = FAMILY[fam], st = `left:${c.x}px;top:${c.y}px;width:${c.w}px;height:${c.h}px;--rot:${c.rot}deg`, attr = `data-card="${c.id}" tabindex="0" role="button"`;
+  // accessible label including status mark, new state, thread count, and selection state
+  cardAria(s, c, sel, L) {
+    let base = this.title(s, c.id);
+    if (c.kind === 'person') { const n = World.npc(s, c.ref); base = n.name + ', ' + n.role; }
+    else if (c.kind === 'ghost') base += ', nog niet ontmoet';
+    else if (c.kind === 'ghostplace') base += ', nog niet bezocht';
+    const parts = [base];
+    const m = Pins.mark(s, c.id); if (m) parts.push('gemarkeerd als ' + Pins.MARKS[m].label.toLowerCase());
+    if (Pins.isNew(s, c.id)) parts.push('nieuw');
+    const tc = L ? L.threads.filter((t) => t.a === c.id || t.b === c.id).length : Pins.ends(s, c.id).length;
+    if (tc > 0) parts.push('verbonden met ' + tc + (tc === 1 ? ' kaart' : ' kaarten'));
+    if (sel === c.id) parts.push('geselecteerd');
+    return parts.join(', ');
+  },
+  cardExtras(s, c) {
+    const isNew = Pins.isNew(s, c.id);
+    const mark = Pins.mark(s, c.id);
+    const note = Pins.note(s, c.id);
+    const badges = (isNew ? '<span class="bc-new">Nieuw</span>' : '') +
+      (mark ? `<span class="bc-mark m-${mark}"><i aria-hidden="true">${Pins.MARKS[mark].icon}</i>${U.esc(Pins.MARKS[mark].label)}</span>` : '');
+    const foot = note ? `<div class="bc-note" data-card-note="${U.esc(c.id)}">${U.esc(note)}</div>` : `<div class="bc-note" data-card-note="${U.esc(c.id)}" hidden></div>`;
+    return { badges: badges ? `<div class="bc-badges">${badges}</div>` : '', foot: foot, hasNew: isNew, mark: mark };
+  },
+  card(s, c, fam, opt) {
+    const F = FAMILY[fam], sel = opt && opt.sel, hl = opt && opt.hl, L = opt && opt.L;
+    const ex = this.cardExtras(s, c);
+    const clsExtra = (hl && hl.has(c.id) ? ' hl' : '') + (sel === c.id ? ' sel' : '') + (ex.hasNew ? ' is-new' : '') + (ex.mark ? ' marked-' + ex.mark : '');
+    const attr = `data-card="${U.esc(c.id)}" tabindex="0" role="button" aria-pressed="${sel === c.id ? 'true' : 'false'}" aria-label="${U.esc(this.cardAria(s, c, sel, L))}"`;
+    const rotSt = `--rot:${c.rot || 0}deg`;
+
     if (c.kind === 'person') {
       const n = World.npc(s, c.ref), tone = Rels.toneOf(s, n.id), r = s.relations[n.id];
-      return `<div class="bc pc" ${attr} aria-label="${U.esc(n.name + ', ' + n.role)}" style="${st};--tone:${TONE_COLOR[tone]};--phbg:${F.photo}"><div class="pin"></div>` +
-        `<div class="ph">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 72 })}</div><div class="pt"><b>${U.esc(n.name)}</b><span>${U.esc(n.role)}</span>${n.kenmerk ? `<span class="km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : ''}<i>${U.esc(r.statusText)}${s.play.cleared[n.id] ? '. Alibi bevestigd.' : ''}</i></div></div>`;
+      return `<div class="bc pc${clsExtra}" ${attr} style="${rotSt};--tone:${TONE_COLOR[tone]};--phbg:${F.photo}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
+        `<div class="pc-body"><div class="ph">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 68 })}</div>` +
+        `<div class="pt"><b>${U.esc(n.name)}</b><span>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</span>${n.kenmerk ? `<span class="km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : ''}<i>${U.esc(r.statusText)}${s.play.cleared[n.id] && Level.get(s).checkLabel ? '. Alibi bevestigd.' : ''}</i></div></div>${ex.foot}</div>`;
     }
     // v0.12.0: blank cards: a plain outline, the name and where you heard it; nothing else
     if (c.kind === 'ghost') {
       const n = World.npc(s, c.ref), h = (s.play.heardOf || {})[n.id];
-      return `<div class="bc pc ghost" ${attr} aria-label="${U.esc(n.name + ', nog niet ontmoet')}" style="${st}"><div class="pin"></div><div class="ph">${this.blank(72)}</div><div class="pt"><b>${U.esc(n.name)}</b><span>Nog niet ontmoet</span><i>Genoemd ${U.esc(Mentions.source(s, h))}.</i></div></div>`;
+      return `<div class="bc pc ghost${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
+        `<div class="pc-body"><div class="ph">${this.blank(68)}</div><div class="pt"><b>${U.esc(n.name)}</b><span>Nog niet ontmoet</span><i>Genoemd ${U.esc(Mentions.source(s, h))}.</i></div></div>${ex.foot}</div>`;
     }
     if (c.kind === 'ghostdoc') {
       const l = World.loc(s, c.loc), o = l.objects.find((x) => x.id === c.ref);
-      return `<div class="bc doc ghost" ${attr} aria-label="${U.esc('Nog te bekijken: ' + o.name)}" style="${st}"><div class="pin"></div><div class="dk">Nog bekijken</div><b>${U.esc(Rnd.cap(o.name))}</b><p>Hier was iets, maar je wist nog te weinig.</p><small>${U.esc(l.name)}</small></div>`;
+      return `<div class="bc doc ghost${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}<div class="dk">Nog bekijken</div><b>${U.esc(Rnd.cap(o.name))}</b><p>Hier was iets, maar je wist nog te weinig.</p><small>${U.esc(l.name)}</small>${ex.foot}</div>`;
     }
     if (c.kind === 'ghostplace') {
       const l = World.loc(s, c.ref);
-      return `<div class="bc tk ghost" ${attr} aria-label="${U.esc(l.name + ', nog niet bezocht')}" style="${st}"><i></i><span>${U.esc(l.name)}</span></div>`;
+      return `<div class="bc tk ghost${clsExtra}" ${attr} style="${rotSt}"><i aria-hidden="true"></i><span>${U.esc(l.name)}</span>${ex.hasNew ? '<span class="bc-new">Nieuw</span>' : ''}${ex.mark ? `<span class="bc-mark m-${ex.mark}" aria-hidden="true">${Pins.MARKS[ex.mark].icon}</span>` : ''}</div>`;
     }
     if (c.kind === 'case') {
-      return `<div class="bc case" ${attr} aria-label="De zaak" style="${st}"><div class="pin"></div><h2>${U.esc(s.meta.title)}</h2><p>${U.esc(s.crime.summary)} ${U.esc(s.crime.personalHook)}</p><small>${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}</small></div>`;
+      return `<div class="bc case${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div><h2>${U.esc(s.meta.title)}</h2><p>${U.esc(s.crime.summary)} ${U.esc(s.crime.personalHook)}</p><small>${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}</small>${ex.foot}</div>`;
     }
     if (c.kind === 'doc') {
       const e = Evidence.get(s, c.ref), loc = World.loc(s, e.source.locationId), obj = loc.objects.find((o) => o.id === e.source.objectId), kind = F.kinds[parseInt(RNG.hashStr(e.key), 36) % F.kinds.length];
-      return `<div class="bc doc" ${attr} aria-label="${U.esc(e.title)}" style="${st}"><div class="pin"></div><div class="dk">${kind}</div><b>${U.esc(e.title)}${s.play.debunked[e.id] ? ' (weerlegd)' : ''}</b>` +
-        `<p>${U.esc(Rnd.cap(e.item || (obj ? obj.name : '')))}</p><small>${U.esc(loc.name)}</small></div>`;
+      return `<div class="bc doc${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}<div class="dk">${kind}</div><b>${U.esc(e.title)}${s.play.debunked[e.id] ? ' (weerlegd)' : ''}</b>` +
+        `<p>${U.esc(Rnd.cap(e.item || (obj ? obj.name : '')))}</p><small>${U.esc(loc.name)}</small>${ex.foot}</div>`;
     }
     if (c.kind === 'claim' || c.kind === 'talk') {
       const con = c.kind === 'claim' ? s.contradictions.find((x) => x.id === c.ref) : null, e = con ? null : Evidence.get(s, c.ref);
       const who = World.npc(s, con ? con.npcId : (e.source.npcId || '')), text = con ? con.claim : e.text, title = con ? 'Verklaring van ' + who.name : e.title;
       const stamp = con && s.play.resolved[con.id] ? '<span class="stamp">doorgeprikt</span>' : e && e.source.type === 'confront' ? '<span class="stamp">bekentenis</span>' : '';
-      return `<div class="bc st${stamp ? ' stamped' : ''}" ${attr} aria-label="${U.esc(title)}" style="${st}"><div class="pin"></div><div class="sp">${who ? Silhouette.svg(who, { s: s, fam: fam, w: 40 }) : ''}</div>` +
-        `<div><q>${U.esc(text)}</q><small>${U.esc(title)}</small></div>${stamp}</div>`;
-    }
-    if (c.kind === 'more') {
-      return `<button class="bc more" data-ui="journal" aria-label="${c.n} ${c.word} meer, open het dagboek" style="${st}"><div class="pin"></div><b>+${c.n} ${c.word}</b><small>Archiveer wat af is, of open je dagboek.</small></button>`;
+      return `<div class="bc st${stamp ? ' stamped' : ''}${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
+        `<div class="st-body"><div class="sp">${who ? Silhouette.svg(who, { s: s, fam: fam, w: 40 }) : ''}</div>` +
+        `<div class="st-txt"><q>${U.esc(text)}</q><small>${U.esc(title)}</small></div>${stamp}</div>${ex.foot}</div>`;
     }
     const l = World.loc(s, c.ref);
-    return `<div class="bc tk" ${attr} aria-label="${U.esc(l.name)}" style="${st}"><i style="background:${TEMPLATE_COLOR[l.template] || '#fff'}"></i><span>${U.esc(l.name)}</span></div>`;
+    return `<div class="bc tk${clsExtra}" ${attr} style="${rotSt}"><i style="background:${TEMPLATE_COLOR[l.template] || '#fff'}" aria-hidden="true"></i><span>${U.esc(l.name)}</span>${ex.hasNew ? '<span class="bc-new">Nieuw</span>' : ''}${ex.mark ? `<span class="bc-mark m-${ex.mark}" aria-hidden="true">${Pins.MARKS[ex.mark].icon}</span>` : ''}</div>`;
+  },
+  // top toolbar of the board: switch between Prikbord and Verdachtenoverzicht, plus link-mode & "Alles gezien" controls
+  bar(s, mode, link, threadKind) {
+    const metN = s.cast.filter((n) => s.play.met[n.id]).length;
+    const newN = Pins.newIds(s).length;
+    const tk = threadKind && Pins.THREAD_KINDS[threadKind] ? threadKind : 'verband';
+    let right = '';
+    if (mode !== 'matrix') {
+      if (link) {
+        right = `<div class="bd-linkbar" role="region" aria-label="Draadjes trekken">` +
+          `<span>Draadje vanaf <b>${U.esc(this.title(s, link))}</b>:</span>` +
+          `<div class="bd-tkinds" role="group" aria-label="Betekenis van draadje">` +
+          Object.keys(Pins.THREAD_KINDS).map((k) => `<button type="button" class="bd-tkind tk-${k}${tk === k ? ' on' : ''}" aria-pressed="${tk === k}" data-ui="thkind" data-v="${k}"><i aria-hidden="true"></i>${U.esc(Pins.THREAD_KINDS[k].label)}</button>`).join('') +
+          `</div><button type="button" class="sp-chip on" data-sp="linkdone">Klaar</button></div>`;
+      } else {
+        const tCount = Pins.threads(s).length;
+        right = `<div class="bd-meta">` +
+          (tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
+          (newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
+          `</div>`;
+      }
+    }
+    return `<div class="bd-bar">` +
+      `<div class="bd-modes" role="tablist" aria-label="Weergave van het zaakbord">` +
+        `<button type="button" role="tab" aria-selected="${mode !== 'matrix'}" class="bd-mode${mode !== 'matrix' ? ' on' : ''}" data-ui="bmode" data-v="board">Prikbord</button>` +
+        `<button type="button" role="tab" aria-selected="${mode === 'matrix'}" class="bd-mode${mode === 'matrix' ? ' on' : ''}" data-ui="bmode" data-v="matrix">Verdachtenoverzicht (${metN})</button>` +
+      `</div>${right}</div>`;
   },
   // sel: the selected card (its family lights up); link: the card you pull threads from (v0.11.0, nothing dims)
-  html(s, fam, sel, link) {
+  html(s, fam, sel, link, opt) {
     const L = this.layout(s), byId = {}; L.cards.forEach((c) => { byId[c.id] = c; });
+    const mode = (opt && opt.mode) || 'board', threadKind = (opt && opt.threadKind) || 'verband';
     if (link && !byId[link]) link = null;
-    const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel ? this.linked(s, L, sel) : null;
+    if (mode === 'matrix') {
+      return { html: this.bar(s, 'matrix', null, threadKind) + this.matrix(s, fam, sel), L: L };
+    }
+    const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel && byId[sel] ? this.linked(s, L, sel) : null;
     if (link) sel = link;
-    let h = `<div class="bd${link ? ' linking' : hl ? ' focus' : ''}" style="height:${this.H}px">`;
-    this.ZONES.forEach((z) => { h += `<div class="zn" style="left:${z[1]}px;top:${z[2]}px">${z[0]}</div>`; });
-    this.folders(s).forEach((f) => { h += `<button class="zf" data-ui="archive" data-v="${f.zone}" style="left:${f.x}px;top:${f.y}px" aria-label="${U.esc(Pins.FOLDER[f.zone])}, ${f.n} ${f.n === 1 ? 'kaart' : 'kaarten'}"><i aria-hidden="true"></i>Archief · ${f.n}</button>`; });
-    L.cards.forEach((c) => { const html = this.card(s, c, fam), cls = (hl && hl.has(c.id) ? ' hl' : '') + (sel === c.id ? ' sel' : ''), prs = c.kind !== 'more' ? ` aria-pressed="${sel === c.id ? 'true' : 'false'}"` : ''; h += (cls ? html.replace('class="bc ', 'class="bc' + cls + ' ') : html).replace(' role="button"', ' role="button"' + prs); });
-    h += `<svg class="bt" viewBox="0 0 ${this.W} ${this.H}" style="height:${this.H}px" aria-hidden="true">`;
-    if (hl && sel && !link) { const e = Evidence.get(s, sel.slice(2)); if (e) e.requires.forEach((r) => { const a = byId['d:' + r] || byId['s:' + r]; if (a) h += `<path class="req hl" d="${this.path(this.anchor(byId[sel], a), this.anchor(a, byId[sel]), 'req')}"/>`; }); }
-    L.threads.forEach((t) => { const a = byId[t.a], b = byId[t.b]; const on = hl && hl.has(t.a) && hl.has(t.b); h += `<path class="${t.kind}${on ? ' hl' : ''}" d="${this.path(this.anchor(a, b), this.anchor(b, a), t.kind)}"/>`; });
-    L.threads.forEach((t) => { if (t.kind === 'said') return; [[byId[t.a], byId[t.b]], [byId[t.b], byId[t.a]]].forEach((q2) => { const q = this.anchor(q2[0], q2[1]); h += `<circle cx="${q[0]}" cy="${q[1]}" r="4"/>`; }); });
-    return { html: h + '</svg></div>', L: L };
+    const foldersByZone = {}; this.folders(s).forEach((f) => { foldersByZone[f.zone] = f.n; });
+    let h = this.bar(s, 'board', link, threadKind);
+    h += `<div class="bd${link ? ' linking' : hl ? ' focus' : ''}">`;
+    h += `<svg class="bt" aria-hidden="true"></svg>`;
+    h += `<div class="bd-grid">`;
+    this.ZONES.forEach((z) => {
+      const fCount = foldersByZone[z.key] || 0;
+      const folderBtn = fCount > 0 ? `<button type="button" class="zf" data-ui="archive" data-v="${z.key}" aria-label="${U.esc(Pins.FOLDER[z.key])}, ${fCount} ${fCount === 1 ? 'kaart' : 'kaarten'}"><i aria-hidden="true"></i>Archief · ${fCount}</button>` : '';
+      const zCards = L.zones[z.key] || [];
+      const cardsHtml = zCards.length
+        ? zCards.map((c) => this.card(s, c, fam, { sel: sel, hl: hl, L: L })).join('')
+        : `<p class="bd-empty">${U.esc(z.empty)}</p>`;
+      h += `<section class="bd-zone bd-zone-${z.key}" data-zone="${z.key}" aria-label="${U.esc(z.label)}">` +
+        `<div class="zn-head"><h2 class="zn">${U.esc(z.label)}</h2>${folderBtn}</div>` +
+        `<div class="bd-cards bd-cards-${z.key}">${cardsHtml}</div></section>`;
+    });
+    h += `</div></div>`;
+    return { html: h, L: L };
+  },
+  // v0.14.0: leak-free suspect comparison matrix (only public, player-discovered data, sorted alphabetically)
+  matrix(s, fam, sel) {
+    const p = s.play, lv = Level.get(s);
+    const met = s.cast.filter((n) => p.met[n.id]).slice().sort(byName);
+    const ghosts = s.cast.filter((n) => !p.met[n.id] && p.heardOf && p.heardOf[n.id]).slice().sort(byName);
+    const found = Evidence.found(s).filter((e) => e.route !== 'start');
+
+    const alibiCell = (n) => {
+      const a = s.alibis && s.alibis[n.id];
+      if (!a || !p.asked[n.id + ':alibi']) return '<span class="mx-mute">Nog niet gevraagd</span>';
+      const comp = a.withId ? World.npc(s, a.withId) : null;
+      const where = World.loc(s, a.locId).name + (comp ? ' (met ' + U.first(comp) + ')' : ' (alleen)');
+      const chk = p.alibiCheck && p.alibiCheck[n.id];
+      let badge = '<span class="mx-st st-open">Niet gecontroleerd</span>';
+      if (chk) {
+        if (!lv.checkLabel) badge = '<span class="mx-st st-open">Gecontroleerd (zie dagboek)</span>';
+        else badge = chk.ok
+          ? `<span class="mx-st st-ok">✓ Bevestigd${String(chk.by).indexOf('obj:') === 0 ? ' (stuk)' : ' door ' + U.esc(U.first(World.npc(s, chk.by)))}</span>`
+          : `<span class="mx-st st-bad">✗ Tegengesproken${String(chk.by).indexOf('obj:') === 0 ? ' (stuk)' : ' door ' + U.esc(U.first(World.npc(s, chk.by)))}</span>`;
+      } else if (p.cleared[n.id] && lv.checkLabel) {
+        badge = '<span class="mx-st st-ok">✓ Bevestigd</span>';
+      }
+      return `<div class="mx-alibi"><span>${U.esc(where)}</span>${badge}</div>`;
+    };
+
+    const cluesCell = (n) => {
+      const pid = 'p:' + n.id, seen = new Set(), chips = [];
+      const pushChip = (cid, label, cls) => {
+        if (seen.has(cid) || !Pins.ok(s, cid)) return;
+        seen.add(cid);
+        chips.push(`<button type="button" class="mx-chip ${cls || ''}" data-card="${U.esc(cid)}">${U.esc(label)}</button>`);
+      };
+      // player threads attached to this person
+      Pins.ends(s, pid).filter((o) => Pins.ok(s, o)).sort((a, b) => this.title(s, a).localeCompare(this.title(s, b), 'nl')).forEach((o) => {
+        const th = Pins.threadOf(s, pid, o), mk = Pins.threadKind(th);
+        pushChip(o, this.title(s, o), 'th-' + mk);
+      });
+      // automatic evidence pointers on Makkelijk
+      if (lv.threads) found.forEach((e) => {
+        if (e.pointsTo === n.id) { const cid = Pins.cardOf(s, e.id); if (cid) pushChip(cid, e.title, p.debunked[e.id] ? 'th-dead' : 'th-auto'); }
+      });
+      // heard contradictions by this person
+      s.contradictions.filter((c) => c.npcId === n.id && p.heard[c.id]).forEach((c) => {
+        pushChip('s:' + c.id, p.resolved[c.id] ? 'Verklaring (doorgeprikt)' : 'Verklaring', p.resolved[c.id] ? 'th-bevestigd' : 'th-claim');
+      });
+      return chips.length ? `<div class="mx-chips">${chips.join('')}</div>` : '<span class="mx-mute">Geen gekoppelde sporen</span>';
+    };
+
+    const markCell = (n) => {
+      const pid = 'p:' + n.id, cur = Pins.mark(s, pid), note = Pins.note(s, pid);
+      const btns = Object.keys(Pins.MARKS).map((k) => `<button type="button" class="mx-mark m-${k}${cur === k ? ' on' : ''}" aria-pressed="${cur === k}" data-sp="mark" data-id="${U.esc(pid)}" data-v="${k}" title="${U.esc(Pins.MARKS[k].label)}"><i aria-hidden="true">${Pins.MARKS[k].icon}</i><span>${U.esc(Pins.MARKS[k].label)}</span></button>`).join('');
+      return `<div class="mx-judge"><div class="mx-marks" role="group" aria-label="Eigen oordeel over ${U.esc(n.name)}">${btns}</div>${note ? `<p class="mx-note">${U.esc(note)}</p>` : ''}</div>`;
+    };
+
+    let h = `<div class="mx-wrap">`;
+    h += `<div class="mx-intro"><p>Vergelijk de betrokkenen op beginletter, kenmerk, alibi en gekoppelde sporen. Tik op een naam of spoor om het dossier te openen.</p></div>`;
+    if (!met.length) {
+      h += `<div class="mx-empty"><h3>Nog niemand ontmoet</h3><p>Zodra je betrokkenen aanspreekt tijdens een bezoek, verschijnen ze hier naast elkaar zodat je aanwijzingen kunt vergelijken.</p></div>`;
+    } else {
+      h += `<div class="mx-table-wrap"><table class="mx-table"><thead><tr>` +
+        `<th scope="col">Persoon &amp; beginletter</th>` +
+        `<th scope="col">Kenmerk</th>` +
+        `<th scope="col">Alibi</th>` +
+        `<th scope="col">Gekoppelde sporen</th>` +
+        `<th scope="col">Eigen oordeel</th>` +
+        `</tr></thead><tbody>`;
+      met.forEach((n) => {
+        const pid = 'p:' + n.id, tone = Rels.toneOf(s, n.id), ini = n.name.charAt(0).toUpperCase(), cur = Pins.mark(s, pid);
+        const cleared = !!(p.cleared[n.id] && lv.dim);
+        h += `<tr class="${sel === pid ? 'sel' : ''}${cleared ? ' mx-cleared' : ''}${cur ? ' mx-m-' + cur : ''}">` +
+          `<td data-label="Persoon"><button type="button" class="mx-who" data-card="${U.esc(pid)}" aria-pressed="${sel === pid ? 'true' : 'false'}">` +
+            `<span class="mx-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 38 })}</span>` +
+            `<span class="mx-who-txt"><span class="mx-name-row"><span class="mx-ini" title="Beginletter ${ini}">${ini}</span><b>${U.esc(n.name)}</b></span><small>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</small></span>` +
+          `</button></td>` +
+          `<td data-label="Kenmerk">${n.kenmerk ? `<span class="mx-km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : '<span class="mx-mute">—</span>'}</td>` +
+          `<td data-label="Alibi">${alibiCell(n)}</td>` +
+          `<td data-label="Gekoppelde sporen">${cluesCell(n)}</td>` +
+          `<td data-label="Eigen oordeel">${markCell(n)}</td>` +
+        `</tr>`;
+      });
+      h += `</tbody></table></div>`;
+    }
+    if (ghosts.length) {
+      h += `<div class="mx-ghosts"><h3>Alleen van naam genoemd (nog niet ontmoet)</h3><div class="mx-chips">` +
+        ghosts.map((n) => `<button type="button" class="mx-chip ghost" data-card="p:${U.esc(n.id)}">${U.esc(n.name)}</button>`).join('') +
+        `</div></div>`;
+    }
+    return h + `</div>`;
   },
   detail(s, id, fam) {
     const k = id === 'case' ? 'case' : id.split(':')[0], ref = id.slice(k.length + 1);
@@ -390,7 +549,7 @@ const Board = {
       const l = World.loc(s, ref), open = PARTS.slice(0, DAY.parts).filter((x, i) => World.openAt(l, i));
       h += `<h3>${U.esc(l.name)}</h3><p>${U.esc(l.description)}</p><p class="sp-note">Open in de ${open.join(', ') || 'geen enkel dagdeel'}.</p>`;
       const T = Travel.check(s, l.id);
-      if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button class="sp-btn" data-sp="visit" data-v="${l.id}">${T.here ? 'Ga naar binnen' : 'Ga erheen (' + T.walk + ' min, aankomst ' + U.hm(T.at) + ')'}</button>`;
+      if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button type="button" class="sp-btn" data-sp="visit" data-v="${l.id}">${T.here ? 'Ga naar binnen' : 'Ga erheen (' + T.walk + ' min, aankomst ' + U.hm(T.at) + ')'}</button>`;
     } else if (k === 's' && ref.indexOf('con_') === 0) {
       const c = s.contradictions.find((x) => x.id === ref), n = World.npc(s, c.npcId);
       h += `<h3>Verklaring van ${U.esc(n.name)}</h3><p>${U.esc(c.claim)}</p>` + (s.play.resolved[c.id] ? `<p class="sp-note">Doorgeprikt.${c.reveal ? ' ' + U.esc(c.reveal) : ''}</p>` : `<p class="sp-note">Nog niet getoetst.</p>`);
@@ -413,21 +572,40 @@ const Board = {
     if (ref.indexOf('con_') === 0) { const c = s.contradictions.find((x) => x.id === ref); return c ? 'Verklaring van ' + World.npc(s, c.npcId).name : '?'; }
     const e = Evidence.get(s, ref); return e ? e.title : '?';
   },
-  // threads and archive under every detail panel
+  // v0.14.0: personal marks, 1-line note, threads (with meaning) and archive under every detail panel
   tools(s, id) {
     if (!Pins.ok(s, id)) return '';
-    const ends = Pins.ends(s, id).filter((o) => Pins.ok(s, o)).sort((a, b) => this.title(s, a).localeCompare(this.title(s, b), 'nl')), z = Pins.zone(id);
-    let h = `<h4>Je draadjes</h4>` + (ends.length ? `<ul class="sp-threads">${ends.map((o) => `<li>${U.esc(this.title(s, o))}${Pins.archived(s, o) ? ' <i>(in het archief)</i>' : ''}</li>`).join('')}</ul>`
+    const ends = Pins.ends(s, id).filter((o) => Pins.ok(s, o)).sort((a, b) => this.title(s, a).localeCompare(this.title(s, b), 'nl'));
+    const z = Pins.zone(id), curMark = Pins.mark(s, id), curNote = Pins.note(s, id);
+    let h = '';
+    if (z !== 'case') {
+      h += `<h4>Eigen markering</h4><div class="sp-marks" role="group" aria-label="Eigen markering">` +
+        Object.keys(Pins.MARKS).map((k) => `<button type="button" class="sp-mark m-${k}${curMark === k ? ' on' : ''}" aria-pressed="${curMark === k}" data-sp="mark" data-id="${U.esc(id)}" data-v="${k}"><i aria-hidden="true">${Pins.MARKS[k].icon}</i>${U.esc(Pins.MARKS[k].label)}</button>`).join('') +
+        `</div>`;
+    }
+    h += `<div class="sp-notebox"><label for="cardNote">Eigen notitie</label><div class="sp-note-row"><input id="cardNote" type="text" maxlength="140" data-note-id="${U.esc(id)}" value="${U.esc(curNote)}" placeholder="Korte notitie op deze kaart…">` +
+      (curNote ? `<button type="button" class="sp-note-clr" data-sp="noteclr" data-id="${U.esc(id)}" aria-label="Wis notitie">×</button>` : '') + `</div></div>`;
+    h += `<h4>Je draadjes</h4>` + (ends.length ? `<ul class="sp-threads">${ends.map((o) => {
+      const th = Pins.threadOf(s, id, o), mk = Pins.threadKind(th);
+      return `<li><span class="th-dot tk-${mk}" aria-hidden="true"></span><span>${U.esc(this.title(s, o))} <small class="th-lbl">(${U.esc(Pins.THREAD_KINDS[mk].label)})</small>${Pins.archived(s, o) ? ' <i>(in het archief)</i>' : ''}</span></li>`;
+    }).join('')}</ul>`
       : `<p class="sp-note">Nog geen draadjes. Je draadjes zijn notities: pas het zaakverslag toetst je conclusie.</p>`);
-    h += `<div class="sp-acts"><button class="sp-btn" data-sp="linkmode" data-v="${id}">Draadje trekken</button>` + (z !== 'case' ? `<button class="sp-btn" data-sp="arch" data-v="${id}">Naar ${Pins.FOLDER[z]}</button>` : '') + '</div>';
+    h += `<div class="sp-acts"><button type="button" class="sp-btn" data-sp="linkmode" data-v="${U.esc(id)}">Draadje trekken</button>` + (z !== 'case' ? `<button type="button" class="sp-btn" data-sp="arch" data-v="${U.esc(id)}">Naar ${Pins.FOLDER[z]}</button>` : '') + '</div>';
     return h;
   },
-  // the side panel while you pull threads from one card
-  linkPanel(s, from) {
+  // the side panel while you pull threads from one card (v0.14.0: choose optional thread meaning)
+  linkPanel(s, from, curKind) {
+    const tk = curKind && Pins.THREAD_KINDS[curKind] ? curKind : 'verband';
     const ends = Pins.ends(s, from).filter((o) => Pins.ok(s, o)).sort((a, b) => this.title(s, a).localeCompare(this.title(s, b), 'nl'));
-    let h = `<button class="sp-x" data-sp="linkdone">Klaar</button><h3>Draadjes trekken</h3><p>Vanaf <b>${U.esc(this.title(s, from))}</b>. Tik op kaarten op het bord om ze te verbinden. Tik nog eens om een draadje los te halen.</p>`;
-    h += `<h4>Verbonden met</h4>` + (ends.length ? `<div class="sp-chips">${ends.map((o) => `<button class="sp-chip on" data-sp="unthread" data-a="${U.esc(from)}" data-b="${U.esc(o)}" aria-label="Haal het draadje naar ${U.esc(this.title(s, o))} los">${U.esc(this.title(s, o))}${Pins.archived(s, o) ? ' (archief)' : ''} ×</button>`).join('')}</div>` : '<p class="sp-note">Nog niets.</p>');
-    return h + `<button class="sp-btn go wide" data-sp="linkdone">Klaar</button>`;
+    let h = `<button type="button" class="sp-x" data-sp="linkdone">Klaar</button><h3>Draadjes trekken</h3>` +
+      `<p>Vanaf <b>${U.esc(this.title(s, from))}</b>. Tik op kaarten op het bord om ze te verbinden. Tik nog eens met dezelfde kleur om het draadje los te halen.</p>`;
+    h += `<h4>Betekenis van het draadje</h4><div class="bd-tkinds side" role="group" aria-label="Betekenis van het draadje">` +
+      Object.keys(Pins.THREAD_KINDS).map((k) => `<button type="button" class="bd-tkind tk-${k}${tk === k ? ' on' : ''}" aria-pressed="${tk === k}" data-ui="thkind" data-v="${k}"><i aria-hidden="true"></i>${U.esc(Pins.THREAD_KINDS[k].label)}</button>`).join('') + `</div>`;
+    h += `<h4>Verbonden met</h4>` + (ends.length ? `<div class="sp-chips">${ends.map((o) => {
+      const th = Pins.threadOf(s, from, o), mk = Pins.threadKind(th);
+      return `<button type="button" class="sp-chip on tk-chip-${mk}" data-sp="unthread" data-a="${U.esc(from)}" data-b="${U.esc(o)}" aria-label="Haal het draadje (${Pins.THREAD_KINDS[mk].label}) naar ${U.esc(this.title(s, o))} los"><span class="th-dot tk-${mk}" aria-hidden="true"></span>${U.esc(this.title(s, o))}${Pins.archived(s, o) ? ' (archief)' : ''} ×</button>`;
+    }).join('')}</div>` : '<p class="sp-note">Nog niets.</p>');
+    return h + `<button type="button" class="sp-btn go wide" data-sp="linkdone">Klaar</button>`;
   }
 };
 

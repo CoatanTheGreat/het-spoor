@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.13.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.14.0', schema: 8 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -756,8 +756,11 @@ const Evidence = {
     if (e.source && e.source.objectId && s.play.early) delete s.play.early[e.source.objectId];
     // v0.12.0: threads of a blank object card move to the piece it turned out to hold; new evidence always lands on the board (v0.12.1)
     if (e.source && e.source.objectId && s.player) { const from = 'o:' + e.source.objectId, to = 'd:' + e.id;
-      if (Array.isArray(s.player.threads)) s.player.threads = s.player.threads.map((t) => t.map((x) => x === from ? to : x)).filter((t) => t[0] !== t[1]).map((t) => t[0] < t[1] ? t : [t[1], t[0]]);
-      if (s.player.archive) { delete s.player.archive[from]; delete s.player.archive[to]; } }
+      if (Array.isArray(s.player.threads)) s.player.threads = s.player.threads.map((t) => { const a = t[0] === from ? to : t[0], b = t[1] === from ? to : t[1]; return t[2] ? (a < b ? [a, b, t[2]] : [b, a, t[2]]) : (a < b ? [a, b] : [b, a]); }).filter((t) => t[0] !== t[1]);
+      if (s.player.archive) { delete s.player.archive[from]; delete s.player.archive[to]; }
+      if (s.player.marks && s.player.marks[from]) { if (!s.player.marks[to]) s.player.marks[to] = s.player.marks[from]; delete s.player.marks[from]; }
+      if (s.player.notes && s.player.notes[from]) { if (!s.player.notes[to]) s.player.notes[to] = s.player.notes[from]; delete s.player.notes[from]; }
+      if (s.player.seen) delete s.player.seen[from]; }
     if (e.item) Log.sys(s, 'Je neemt ' + e.item + ' mee. Het komt als stuk op je zaakbord.');
     if (e.key === 'people_denial' && e.source.type === 'object') {   // v0.9.0: the document unmasks the lying companion
       const C = s.truth.culpritId, chk = s.play.alibiCheck && s.play.alibiCheck[C], liar = World.npc(s, s.truth.roles.companion), cul = World.npc(s, C);
@@ -1122,6 +1125,17 @@ const Dialogue = {
 const Pins = {
   ZONE: { p: 'person', d: 'doc', o: 'doc', s: 'stmt', l: 'place' },
   FOLDER: { person: 'Archief Personen', doc: 'Archief Stukken', stmt: 'Archief Verklaringen', place: 'Archief Plaatsen' },
+  // v0.14.0: optional meaning on player threads and personal status marks on cards (pure player notes, never read by puzzle)
+  THREAD_KINDS: {
+    verband:   { label: 'Verband',   desc: 'Hoort bij elkaar' },
+    bevestigd: { label: 'Bevestigd', desc: 'Sterk verband' },
+    vermoeden: { label: 'Vermoeden', desc: 'Nog uitzoeken' }
+  },
+  MARKS: {
+    verdacht:   { label: 'Verdacht',    icon: '!' },
+    onschuldig: { label: 'Onschuldig',  icon: '✓' },
+    checken:    { label: 'Nog checken', icon: '?' }
+  },
   zone(id) { return id === 'case' ? 'case' : this.ZONE[String(id).split(':')[0]] || null; },
   cardOf(s, eid) { const e = Evidence.get(s, eid); return e ? (e.source.type === 'object' ? 'd:' : 's:') + e.id : null; },
   // a card that can stand on the board right now
@@ -1137,12 +1151,60 @@ const Pins = {
     const e = Evidence.get(s, ref); if (!e || !p.found[e.id] || e.route === 'start') return false;
     return (e.source.type === 'object') === (k === 'd');
   },
+  cardKind(s, id) {
+    if (id === 'case') return 'case';
+    if (!this.ok(s, id)) return null;
+    const k = String(id).split(':')[0], ref = String(id).slice(k.length + 1);
+    if (k === 'p') return s.play.met[ref] ? 'person' : 'ghost';
+    if (k === 'd') return 'doc';
+    if (k === 'o') return 'ghostdoc';
+    if (k === 's') return ref.indexOf('con_') === 0 ? 'claim' : 'talk';
+    if (k === 'l') return s.play.visited[ref] ? 'place' : 'ghostplace';
+    return null;
+  },
   key: (a, b) => a < b ? a + '|' + b : b + '|' + a,
   threads: (s) => (s.player && Array.isArray(s.player.threads)) ? s.player.threads : [],
-  has(s, a, b) { const k = this.key(a, b); return this.threads(s).some((t) => this.key(t[0], t[1]) === k); },
+  threadKind(t) { return (t && t[2] && this.THREAD_KINDS[t[2]]) ? t[2] : 'verband'; },
+  threadOf(s, a, b) { const k = this.key(a, b); return this.threads(s).find((t) => this.key(t[0], t[1]) === k) || null; },
+  has(s, a, b) { return !!this.threadOf(s, a, b); },
   ends(s, id) { return this.threads(s).filter((t) => t[0] === id || t[1] === id).map((t) => t[0] === id ? t[1] : t[0]); },
+  mark(s, id) { const m = s.player && s.player.marks && s.player.marks[id]; return m && this.MARKS[m] ? m : null; },
+  note(s, id) { const t = s.player && s.player.notes && s.player.notes[id]; return typeof t === 'string' ? t : ''; },
   archived: (s, id) => !!(s.player && s.player.archive && s.player.archive[id]),
   inFolder(s, zone) { const A = (s.player && s.player.archive) || {}; return Object.keys(A).filter((id) => A[id] && this.zone(id) === zone && this.ok(s, id)).sort(); },
+  allBoardIds(s) {
+    const p = s.play, hO = p.heardOf || {}, hL = p.heardOfLoc || {}, out = [];
+    s.cast.forEach((n) => { if (p.met[n.id] || hO[n.id]) out.push('p:' + n.id); });
+    Evidence.found(s).forEach((e) => { if (e.route !== 'start') out.push((e.source.type === 'object' ? 'd:' : 's:') + e.id); });
+    s.world.locations.forEach((l) => {
+      l.objects.forEach((o) => { if (this.ok(s, 'o:' + o.id)) out.push('o:' + o.id); });
+      if (p.visited[l.id] || hL[l.id]) out.push('l:' + l.id);
+    });
+    s.contradictions.forEach((c) => { if (p.heard[c.id]) out.push('s:' + c.id); });
+    return out.filter((id) => !this.archived(s, id));
+  },
+  isNew(s, id) {
+    if (!id || id === 'case' || this.archived(s, id)) return false;
+    const seen = s.player && s.player.seen;
+    if (!seen) return false;
+    const kind = this.cardKind(s, id);
+    return !!kind && seen[id] !== kind;
+  },
+  newIds(s) { return this.allBoardIds(s).filter((id) => this.isNew(s, id)); },
+  journalCounts(s) {
+    const p = s.play;
+    return {
+      ev: Evidence.found(s).length,
+      claims: s.contradictions.filter((c) => p.heard[c.id]).length,
+      met: s.cast.filter((n) => p.met[n.id]).length
+    };
+  },
+  journalNew(s) {
+    const sj = s.player && s.player.seenJournal;
+    if (!sj) return 0;
+    const c = this.journalCounts(s);
+    return Math.max(0, c.ev - (sj.ev || 0)) + Math.max(0, c.claims - (sj.claims || 0)) + Math.max(0, c.met - (sj.met || 0));
+  },
   // saves from v0.7 to v0.10 kept one thread from a piece to one person
   migrate(s) { const L = (s.player && s.player.links) || {}, out = [];
     Object.keys(L).sort().forEach((eid) => { const a = this.cardOf(s, eid), b = L[eid] ? 'p:' + L[eid] : null; if (a && b && !out.some((t) => this.key(t[0], t[1]) === this.key(a, b))) out.push(a < b ? [a, b] : [b, a]); });
@@ -1214,11 +1276,52 @@ const Act = {
     if (!id || id === 'case' || !Pins.zone(id) || !Pins.ok(s, id)) return false;
     const A = s.player.archive = s.player.archive || {}; if (on) A[id] = true; else delete A[id]; return true;
   },
-  // v0.11.0: a thread between any two board cards, as many as you like; pulling the same pair again removes it
-  thread(s, a, b) {
+  // v0.11.0 / v0.14.0: a thread between any two board cards with optional meaning (verband / bevestigd / vermoeden).
+  // Calling without kind toggles (backward compatible). Calling with a different kind updates its meaning; same kind removes it.
+  thread(s, a, b, kind) {
     if (!a || !b || a === b || !Pins.ok(s, a) || !Pins.ok(s, b)) return false;
     const T = s.player.threads = Pins.threads(s).slice(), k = Pins.key(a, b), i = T.findIndex((t) => Pins.key(t[0], t[1]) === k);
-    if (i >= 0) T.splice(i, 1); else T.push(a < b ? [a, b] : [b, a]); return true;
+    const pair = a < b ? [a, b] : [b, a], kValid = kind && Pins.THREAD_KINDS[kind] ? kind : null;
+    if (i >= 0) {
+      if (!kValid || Pins.threadKind(T[i]) === kValid) T.splice(i, 1);
+      else T[i] = kValid === 'verband' ? pair : [pair[0], pair[1], kValid];
+    } else {
+      T.push(kValid && kValid !== 'verband' ? [pair[0], pair[1], kValid] : pair);
+    }
+    return true;
+  },
+  // v0.14.0: personal status tag on any board card except 'case' (verdacht / onschuldig / checken); same value toggles off
+  mark(s, id, mark) {
+    if (!id || id === 'case' || !Pins.ok(s, id)) return false;
+    const M = s.player.marks = s.player.marks || {};
+    if (!mark || M[id] === mark) { delete M[id]; return true; }
+    if (!Pins.MARKS[mark]) return false;
+    M[id] = mark; return true;
+  },
+  // v0.14.0: short personal one-line note on any board card
+  note(s, id, text) {
+    if (!id || !Pins.ok(s, id)) return false;
+    const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    const N = s.player.notes = s.player.notes || {};
+    if (clean) N[id] = clean; else delete N[id];
+    return true;
+  },
+  // v0.14.0: mark one or more board cards (or all currently visible cards) as seen to clear "Nieuw" badges
+  see(s, ids) {
+    if (!s || !s.player) return false;
+    const S = s.player.seen = s.player.seen || {};
+    const list = !ids ? Pins.allBoardIds(s) : Array.isArray(ids) ? ids : [ids];
+    let changed = false;
+    list.forEach((id) => {
+      const k = Pins.cardKind(s, id);
+      if (k && S[id] !== k) { S[id] = k; changed = true; }
+    });
+    return changed;
+  },
+  seeJournal(s) {
+    if (!s || !s.player) return false;
+    s.player.seenJournal = Pins.journalCounts(s);
+    return true;
   },
   wait(s) {
     if (s.play.ended || s.visit) return false; Clock.norm(s); if (s.clock.part >= DAY.parts) return false;
@@ -1550,7 +1653,7 @@ const Game = {
     const s = {
       schema: APP.schema, version: APP.version, seed: w.seed, startLoc: w.startLoc, turn: 0, settings: { level: LEVELS[level] ? level : 'normaal' },
       clock: { day: 1, part: 0, min: PART_START[0] }, pos: w.startLoc,
-      player: { money: 25, dossier: { suspectId: null, motiveEvidenceId: null, methodEvidenceId: null }, links: {}, threads: [], archive: {} },
+      player: { money: 25, dossier: { suspectId: null, motiveEvidenceId: null, methodEvidenceId: null }, links: {}, threads: [], archive: {}, marks: {}, notes: {}, seen: { case: 'case' }, seenJournal: null },
       visit: null,
       meta: w.meta, protagonist: w.protagonist, world: w.world, crime: w.crime, truth: w.truth,
       cast: w.cast, crowd: w.crowd, schedule: null, evidence: w.evidence, contradictions: w.contradictions, relations: w.relations, alibis: w.alibis,
@@ -1569,6 +1672,8 @@ const Game = {
     Evidence.give(s, s.evidence[0], 'start');
     Log.narr(s, 'Je logeert in ' + start.name + '.');
     Log.sys(s, 'Het is acht uur en je bent in ' + start.name + '. Lopen naar een andere plek kost 15 tot 45 minuten. Aanspreken en onderzoeken kost ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + '. Om twaalf en om vijf uur gaan de mensen naar hun volgende plek.');
+    Act.see(s);
+    Act.seeJournal(s);
     return s;
   },
   check(s) {
@@ -1632,9 +1737,12 @@ const Save = {
     ['seed', 'clock', 'player', 'world', 'cast', 'crowd', 'schedule', 'evidence', 'contradictions', 'relations', 'alibis', 'settings', 'play', 'log'].forEach((k) => { if (!(k in s)) throw new Error('Savegame mist "' + k + '".'); });
     if (typeof s.clock.part !== 'number') throw new Error('Savegame heeft geen dagdeel in de klok.');
     s.visit = s.visit || null; s.ui = s.ui || {}; s.play.early = s.play.early || {}; s.play.alibiCheck = s.play.alibiCheck || {}; s.player.links = s.player.links || {}; if (!Array.isArray(s.player.threads)) s.player.threads = Pins.migrate(s); s.player.archive = s.player.archive || {};
+    s.player.marks = s.player.marks || {}; s.player.notes = s.player.notes || {};
     Clock.norm(s); s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
     if (!s.play.heardOf || !s.play.heardOfLoc) { s.play.heardOf = s.play.heardOf || {}; s.play.heardOfLoc = s.play.heardOfLoc || {}; (s.log || []).forEach((e) => Mentions.scan(s, e)); }
     ['metCrowd', 'examined', 'xt', 'xtDone'].forEach((k) => { s.play[k] = s.play[k] || {}; });
+    if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
+    if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
     return s;
   },
   meta: (s) => ({ seed: s.seed, title: s.meta.title, time: U.time(s.clock), saved: new Date().toISOString() })
@@ -1902,14 +2010,15 @@ const Tests = {
       });
       return { ok: !bad2.length, info: bad2.length ? bad2.slice(0, 3).join(' | ') : 'hoogste herhaling ' + worst.n + 'x' };
     });
-    // ----- views (paper and ink + v0.6.2 Interrogation) -----
-    t('Uiterlijk en verhoorscherm lekken de dader niet: silhouet, bord, tableau, tempo en verhoor (10 seeds)', () => {
+    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix) -----
+    t('Uiterlijk en verhoorscherm lekken de dader niet: silhouet, bord, verdachtenmatrix, tableau, tempo en verhoor (10 seeds)', () => {
       const b2 = [];
       for (let i = 0; i < 10; i++) {
         const s = SpikeData.make('leak-' + i, 'laat'), fam = famOf(s);
         const render = (st) => {
           const base = st.cast.slice().sort(byName).map((n) => Silhouette.svg(n, { fam: fam, mode: 'full' }) + (typeof Interrogation !== 'undefined' ? JSON.stringify(Interrogation.pace(n)) : '')).join('')
             + Board.html(st, fam, null).html
+            + Board.matrix(st, fam, null)
             + st.world.locations.map((l) => Tableau.svg(st, l.id, 1, fam)).join('');
           const ivs = typeof Interrogation !== 'undefined' ? st.cast.slice().sort(byName).map((n) => {
             const clone = U.clone(st);
@@ -1986,7 +2095,7 @@ const Tests = {
       }
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
     });
-    // ----- v0.10.0: recognisable people, fixed board grid, onboarding, Moeilijk -----
+    // ----- v0.10.0 / v0.14.0: recognisable people, responsive board, onboarding, Moeilijk -----
     t('Personages: het kenmerk staat in elk portret, ook klein, voor kern en figuranten (' + nSeeds + ' seeds, 4 tijdvakken)', () => {
       const b2 = [], vb = BUST_VB, inBox = (b, x0, y0, w, h) => { const ix = Math.max(0, Math.min(b[0] + b[2], x0 + w) - Math.max(b[0], x0)), iy = Math.max(0, Math.min(b[1] + b[3], y0 + h) - Math.max(b[1], y0)); return (ix * iy) / (b[2] * b[3]); };
       for (let i = 0; i < nSeeds; i++) {
@@ -2011,38 +2120,36 @@ const Tests = {
       }
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
     });
-    // rotated corners of a board card or label, as an axis-aligned box
-    const boxOf = (c) => { const a = (c.rot || 0) * Math.PI / 180, hw = c.w / 2, hh = c.h / 2, ex = Math.abs(hw * Math.cos(a)) + Math.abs(hh * Math.sin(a)), ey = Math.abs(hw * Math.sin(a)) + Math.abs(hh * Math.cos(a));
-      return { x0: c.x + hw - ex, x1: c.x + hw + ex, y0: c.y + hh - ey, y1: c.y + hh + ey }; };
-    const crowded = (seed) => {   // a late board with more people, pieces and statements than there are slots
+    const crowded = (seed) => {   // a late board with extra people, pieces and statements
       const s = SpikeData.make(seed, 'laat'), add = (list, k) => list.slice(0, 1).forEach((e) => { for (let j = 0; j < k; j++) { const c = U.clone(e); c.id = e.id + '_x' + j; s.evidence.push(c); s.play.found[c.id] = { day: 1 }; } });
       add(Evidence.found(s).filter((e) => e.source.type === 'object' && e.route !== 'start'), 4);
       add(Evidence.found(s).filter((e) => e.source.type !== 'object' && e.route !== 'start'), 5);
       for (let j = 0; j < 3; j++) { const n = U.clone(s.cast[j]); n.id = n.id + '_x' + j; n.name = 'Zz ' + n.name; s.cast.push(n); s.relations[n.id] = U.clone(s.relations[s.cast[j].id]); s.play.met[n.id] = true; }
       return s;
     };
-    t('Zaakbord: vast raster zonder overlap, labels in een eigen kopstrook, gedraaide hoeken meegeteld (' + nSeeds + ' seeds)', () => {
-      const b2 = [], labels = Board.ZONES.map((z) => ({ id: 'zn:' + z[0], x: z[1], y: z[2], w: Board.labelW(z), h: 28, rot: -2, top: z[2] < 44 }));
+    t('Zaakbord (v0.14.0): responsieve zones zonder vaste pixel-posities, archiefmapjes in koprij, unieke kaarten en zachte draaiing (' + nSeeds + ' seeds)', () => {
+      const b2 = [];
       for (let i = 0; i < nSeeds; i++) ['midden', 'laat', 'vol'].forEach((stage) => {
         const s = stage === 'vol' ? crowded('grid-' + i) : SpikeData.make('grid-' + i, stage);
-        if (stage === 'vol') ['person', 'doc', 'stmt', 'place'].forEach((z) => { const c = Board.layout(s).cards.find((x) => x.kind !== 'more' && x.kind !== 'case' && Pins.zone(x.id) === z); if (c) Act.archive(s, c.id, true); });
-        const folders = Board.folders(s).map((f) => ({ id: 'zf:' + f.zone, x: f.x, y: f.y, w: f.w, h: f.h, rot: 0, top: f.y < 44 }));
+        if (stage === 'vol') ['person', 'doc', 'stmt', 'place'].forEach((z) => { const c = Board.layout(s).cards.find((x) => x.kind !== 'case' && Pins.zone(x.id) === z); if (c) Act.archive(s, c.id, true); });
+        const folders = Board.folders(s), res = Board.html(s, famOf(s), null), L = res.L, html = res.html;
         if (stage === 'vol' && folders.length !== 4) b2.push('grid-' + i + ' mapjes ' + folders.length);
-        const all = Board.layout(s).cards.concat(labels, folders), B = all.map(boxOf), head = (c) => c.id.indexOf('zn:') === 0 || c.id.indexOf('zf:') === 0;
-        all.forEach((c, a) => { const A = B[a];
-          if (A.x0 < 14 || A.x1 > Board.W - 14 || A.y1 > Board.H - 14 || (head(c) ? c.top && A.y1 > 44 : A.y0 < 44)) b2.push('grid-' + i + ' ' + stage + ' ' + c.id + ' buiten');
-          for (let b = a + 1; b < all.length; b++) { const X = B[b]; if (A.x0 < X.x1 + 12 && X.x0 < A.x1 + 12 && A.y0 < X.y1 + 12 && X.y0 < A.y1 + 12) b2.push('grid-' + i + ' ' + stage + ' ' + c.id + '~' + all[b].id); } });
+        const ids = L.cards.map((c) => c.id);
+        if (new Set(ids).size !== ids.length) b2.push('grid-' + i + ' dubbele kaart');
+        if (L.cards.some((c) => Math.abs(c.rot || 0) > 0.85)) b2.push('grid-' + i + ' draaiing > 0.85');
+        if (/style="[^"]*(left:|top:|width:|height:)/.test(html)) b2.push('grid-' + i + ' vaste px');
+        if ((html.match(/class="zn-head"/g) || []).length !== 4) b2.push('grid-' + i + ' geen 4 koprijen');
+        if ((html.match(/data-card="/g) || []).length !== ids.length) b2.push('grid-' + i + ' kaart-count');
       });
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
     });
-    t('Zaakbord: geen kaart valt weg zonder overloopkaart (' + nSeeds + ' seeds, ook overvol)', () => {
+    t('Zaakbord: geen enkele kaart valt weg op het responsieve bord, ook niet overvol (' + nSeeds + ' seeds)', () => {
       const b2 = [];
       for (let i = 0; i < nSeeds; i++) [SpikeData.make('more-' + i, 'laat'), crowded('more-' + i)].forEach((s, v) => {
-        const L = Board.layout(s), f = Evidence.found(s).filter((e) => e.route !== 'start'), more = (z) => { const m = L.cards.find((c) => c.id === 'more:' + z); return m ? m.n : 0; }, cnt = (k) => L.cards.filter((c) => k.indexOf(c.kind) >= 0).length;
+        const L = Board.layout(s), f = Evidence.found(s).filter((e) => e.route !== 'start'), cnt = (k) => L.cards.filter((c) => k.indexOf(c.kind) >= 0).length;
         const want = { person: s.cast.filter((n) => s.play.met[n.id]).length, doc: f.filter((e) => e.source.type === 'object').length, stmt: s.contradictions.filter((c) => s.play.heard[c.id]).length + f.filter((e) => e.source.type !== 'object').length, place: s.world.locations.filter((l) => s.play.visited[l.id]).length };
-        const got = { person: cnt(['person']) + more('person'), doc: cnt(['doc']) + more('doc'), stmt: cnt(['claim', 'talk']) + more('stmt'), place: cnt(['place']) + more('place') };
+        const got = { person: cnt(['person']), doc: cnt(['doc']), stmt: cnt(['claim', 'talk']), place: cnt(['place']) };
         Object.keys(want).forEach((z) => { if (want[z] !== got[z]) b2.push('more-' + i + (v ? ' vol ' : ' ') + z + ' ' + got[z] + '/' + want[z]); });
-        if (v && !(more('person') && more('doc') && more('stmt'))) b2.push('more-' + i + ' geen overloopkaart');
       });
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
     });
@@ -2195,6 +2302,69 @@ const Tests = {
       const s = Game.create('darkmap-1'), bg = MapGen.ground(MapGen.build(s));
       const hasVars = bg.indexOf('var(--map-street)') >= 0 && bg.indexOf('var(--map-water)') >= 0 && bg.indexOf('var(--map-house1)') >= 0;
       return { ok: hasVars, info: hasVars ? 'CSS-variabelen actief' : 'ontbrekende variabelen' };
+    });
+    // ----- v0.14.0 (fase C rest + fase D): thread meanings, marks/notes, Nieuw badges, Verdachtenmatrix, backward save -----
+    t('Draadjes (v0.14.0): betekenis (Verband/Bevestigd/Vermoeden) wisselen, bewaren en overdragen van blanco stuk', () => {
+      const s = SpikeData.make('thk-1', 'laat'); s.settings.level = 'normaal';
+      const L = Board.layout(s).cards, p = L.find((c) => c.kind === 'person').id, pl = L.find((c) => c.kind === 'place').id;
+      const ok1 = Act.thread(s, p, pl, 'bevestigd') && Pins.threadKind(Pins.threadOf(s, p, pl)) === 'bevestigd';
+      const ok2 = Act.thread(s, p, pl, 'vermoeden') && Pins.threadKind(Pins.threadOf(s, p, pl)) === 'vermoeden';
+      const back = Save.unpack(Save.pack(s));
+      const okSave = Pins.threadKind(Pins.threadOf(back, p, pl)) === 'vermoeden';
+      const okToggle = Act.thread(back, p, pl, 'vermoeden') && !Pins.has(back, p, pl);
+      const s2 = Game.create('thk-2', 'normaal'), ev = s2.evidence.find((e) => e.source.type === 'object' && e.requires.length && e.route !== 'start');
+      let okObj = true;
+      if (ev) {
+        s2.play.early[ev.source.objectId] = true; s2.play.met[s2.cast[0].id] = true;
+        Act.thread(s2, 'o:' + ev.source.objectId, 'p:' + s2.cast[0].id, 'bevestigd');
+        ev.requires.forEach((r) => { s2.play.found[r] = { day: 1 }; }); Evidence.give(s2, ev, 'object');
+        okObj = Pins.threadKind(Pins.threadOf(s2, 'd:' + ev.id, 'p:' + s2.cast[0].id)) === 'bevestigd';
+      }
+      return { ok: ok1 && ok2 && okSave && okToggle && okObj, info: [ok1, ok2, okSave, okToggle, okObj].join(', ') };
+    });
+    t('Zaakbord (v0.14.0): eigen status-tags en korte notitie werken op kaarten en verdachtenmatrix en overleven opslaan', () => {
+      const s = SpikeData.make('mk-1', 'laat'), p = 'p:' + s.cast[0].id;
+      const noCase = !Act.mark(s, 'case', 'verdacht') && !Act.mark(s, p, 'onzin');
+      const okM = Act.mark(s, p, 'verdacht') && Pins.mark(s, p) === 'verdacht';
+      const okN = Act.note(s, p, '  Was laat bij de haven\n  met sleutel  ') && Pins.note(s, p) === 'Was laat bij de haven met sleutel';
+      const back = Save.unpack(Save.pack(s));
+      const bh = Board.html(back, famOf(back), p).html, mh = Board.matrix(back, famOf(back), p);
+      const onBoard = bh.indexOf('m-verdacht') >= 0 && bh.indexOf('Was laat bij de haven met sleutel') >= 0;
+      const onMatrix = mh.indexOf('m-verdacht on') >= 0 && mh.indexOf('Was laat bij de haven met sleutel') >= 0;
+      const okOff = Act.mark(back, p, 'verdacht') && Pins.mark(back, p) === null;
+      return { ok: noCase && okM && okN && onBoard && onMatrix && okOff, info: [noCase, okM, okN, onBoard, onMatrix, okOff].join(', ') };
+    });
+    t('Zaakbord (v0.14.0): Nieuw-badges voor nieuwe kaarten en overgang van blanco naar actief verdwijnen na bekijken', () => {
+      const s = Game.create('new-1', 'normaal'), n = s.cast[0];
+      const startZero = Pins.newIds(s).length === 0 && Pins.journalNew(s) === 0;
+      s.play.heardOf[n.id] = { by: null, day: 1 };
+      const ghostNew = Pins.isNew(s, 'p:' + n.id) && Pins.newIds(s).indexOf('p:' + n.id) >= 0;
+      Act.see(s, 'p:' + n.id);
+      const ghostCleared = !Pins.isNew(s, 'p:' + n.id);
+      s.play.met[n.id] = true;
+      const activeNew = Pins.isNew(s, 'p:' + n.id) && Pins.journalNew(s) >= 1;
+      Act.see(s); Act.seeJournal(s);
+      const allCleared = Pins.newIds(s).length === 0 && Pins.journalNew(s) === 0;
+      return { ok: startZero && ghostNew && ghostCleared && activeNew && allCleared, info: [startZero, ghostNew, ghostCleared, activeNew, allCleared].join(', ') };
+    });
+    t('Verdachtenoverzicht (v0.14.0): toont beginletter, kenmerk en ontdekt alibi; lekt geen kenmerk van blanco personen of verborgen alibi', () => {
+      const s = Game.create('mx-1', 'normaal'), fam = famOf(s), met = s.cast[0], ghost = s.cast[1];
+      s.play.met[met.id] = true; s.play.heardOf[ghost.id] = { by: null, day: 1 };
+      const m1 = Board.matrix(s, fam, null);
+      const hasMet = m1.indexOf(met.name) >= 0 && m1.indexOf(KENMERK[met.kenmerk].label) >= 0 && m1.indexOf('Nog niet gevraagd') >= 0;
+      const ghostSafe = m1.indexOf(ghost.name) >= 0 && m1.indexOf('Alleen van naam genoemd') >= 0 && (ghost.kenmerk === met.kenmerk || m1.indexOf(KENMERK[ghost.kenmerk].label) < 0);
+      const noUnaskedAlibi = m1.indexOf(World.loc(s, s.alibis[met.id].locId).name) < 0;
+      s.play.asked[met.id + ':alibi'] = true;
+      const m2 = Board.matrix(s, fam, null);
+      const hasAskedAlibi = m2.indexOf(World.loc(s, s.alibis[met.id].locId).name) >= 0;
+      return { ok: hasMet && ghostSafe && noUnaskedAlibi && hasAskedAlibi, info: [hasMet, ghostSafe, noUnaskedAlibi, hasAskedAlibi].join(', ') };
+    });
+    t('Save-compatibiliteit (v0.14.0): oude schema-8 save zonder marks/notes/seen laadt foutloos zonder valse Nieuw-badges', () => {
+      const s = SpikeData.make('old8-1', 'midden'), raw = JSON.parse(Save.pack(s));
+      delete raw.player.marks; delete raw.player.notes; delete raw.player.seen; delete raw.player.seenJournal;
+      const back = Save.unpack(JSON.stringify(raw));
+      return { ok: typeof back.player.marks === 'object' && typeof back.player.notes === 'object' && Pins.newIds(back).length === 0 && Pins.journalNew(back) === 0,
+        info: 'nieuw: ' + Pins.newIds(back).length + '/' + Pins.journalNew(back) };
     });
     return out;
   }

@@ -75,7 +75,8 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', lastFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', lastFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  _shell: null, _headHtml: null, _stageKey: null, _drawerHtml: null, _drawerId: null, _coachHtml: null, _boardLayout: null, _boardRO: null, _rafThreads: 0, _noteSaveT: null,
   btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
 
   async init() {
@@ -113,7 +114,9 @@ const UI = {
   load(s) {
     clearTimeout(this.typeTimer);
     this.s = s; this.sel = null; this.link = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.feed = [];
+    this.boardMode = 'board'; this.threadKind = 'verband';
     this.tab = s.visit ? 'visit' : 'board';
+    this._stageKey = null; this._headHtml = null; this._drawerHtml = null; this._coachHtml = null;
     $('#app').hidden = false; this.after();
     const cm = s.meta.content; if (cm && cm.sig !== Content.sig) setTimeout(() => this.toast('Let op: dit spel is gestart met contentpakket "' + cm.name + '". Nu actief: "' + Content.cur.name + '". Nieuwe zinnen komen uit het actieve pakket.', 6000), 3500);
   },
@@ -226,6 +229,8 @@ const UI = {
   showStart() { clearTimeout(this.typeTimer); clearTimeout(this.introT); this.close(); this.screen = 'start'; $('#app').hidden = false; this.renderScreen(); },
   renderScreen(focusRadio) {
     const root = $('#app'); clearTimeout(this.introT);
+    this.stopBoardObserver();
+    this._shell = null; this._headHtml = null; this._stageKey = null; this._drawerHtml = null; this._coachHtml = null;
     delete root.dataset.part;
     root.innerHTML = this.screen === 'intro' && this.s ? this.introHtml() : this.startHtml();
     if (this.screen === 'intro') this.revealIntro();
@@ -306,16 +311,47 @@ const UI = {
     el.style.top = Math.round(top) + 'px'; el.style.left = Math.round(Math.max(12, Math.min(W - bw - 12, left))) + 'px'; el.style.visibility = 'visible';
   },
 
-  /* ----- main view (v0.13.0: single calm header + semantic main landmark) ----- */
-  render(keepFocus) {
-    if (this.screen) return this.renderScreen();
-    const s = this.s, root = $('#app'); if (!s) return;
-    clearTimeout(this.typeTimer);
-    const fam = famOf(s), part = s.clock.part, v = s.visit, ended = !!s.play.ended, here = World.here(s);
-    const ae = document.activeElement, fk = keepFocus && ae && (ae.dataset.card || ae.dataset.stn || ae.dataset.hs);
-    const tabs = [['board', 'Zaakbord'], ['map', 'Kaart']].concat(v ? [['visit', 'Bezoek: ' + here.name]] : []);
+  /* ----- main view (v0.14.0: persistent shell + targeted DOM partial renders) ----- */
+  ensureShell() {
+    const root = $('#app');
+    if (this._shell && this._shell.main && root.contains(this._shell.main)) return this._shell;
+    root.innerHTML = `<header class="sp-head" data-shell="head"></header>` +
+      `<main id="main" class="sp-main" data-shell="main"><div class="sp-stage" data-shell="stage"></div><aside class="sp-drawer" data-shell="drawer" hidden></aside></main>` +
+      `<div class="sp-coach-layer" data-shell="coach"></div>`;
+    this._shell = {
+      head: root.querySelector('[data-shell="head"]'),
+      main: root.querySelector('[data-shell="main"]'),
+      stage: root.querySelector('[data-shell="stage"]'),
+      drawer: root.querySelector('[data-shell="drawer"]'),
+      coach: root.querySelector('[data-shell="coach"]')
+    };
+    this._headHtml = null; this._stageKey = null; this._drawerHtml = null; this._drawerId = null; this._coachHtml = null;
+    return this._shell;
+  },
+  captureFocus() {
+    const root = $('#app'), ae = document.activeElement;
+    if (!ae || !root || !root.contains(ae)) return null;
+    if (ae.dataset.card) return `[data-card="${ae.dataset.card}"]`;
+    if (ae.dataset.stn) return `[data-stn="${ae.dataset.stn}"]`;
+    if (ae.dataset.hs) return `[data-hs="${ae.dataset.hs}"]`;
+    if (ae.id) return '#' + ae.id;
+    if (ae.dataset.sp && ae.dataset.id && ae.dataset.v) return `[data-sp="${ae.dataset.sp}"][data-id="${ae.dataset.id}"][data-v="${ae.dataset.v}"]`;
+    if (ae.dataset.ui && ae.dataset.v) return `[data-ui="${ae.dataset.ui}"][data-v="${ae.dataset.v}"]`;
+    if (ae.dataset.ui) return `[data-ui="${ae.dataset.ui}"]`;
+    return null;
+  },
+  restoreFocus(sel) {
+    if (!sel) return;
+    const root = $('#app'), ae = document.activeElement;
+    if (ae && root && root.contains(ae) && ae !== root) return;
+    const el = root && root.querySelector(sel);
+    if (el && el.focus) el.focus({ preventScroll: true });
+  },
+  headHtml(s) {
+    const part = s.clock.part, v = s.visit, ended = !!s.play.ended, here = World.here(s);
+    const newBoard = Pins.newIds(s).length, newJournal = Pins.journalNew(s);
+    const tabs = [['board', 'Zaakbord', newBoard], ['map', 'Kaart', 0]].concat(v ? [['visit', 'Bezoek: ' + here.name, 0]] : []);
     const late = s.clock.day > DAY.soft;
-    root.dataset.part = String(Math.min(part, 3));
     let actHtml = '';
     if (!ended) {
       if (v) actHtml = `<button type="button" class="sp-hbtn go" data-ui="leave">Vertrek uit ${U.esc(here.name)}</button>`;
@@ -325,28 +361,282 @@ const UI = {
       }
     }
     const clockAria = `Dag ${s.clock.day} van ${DAY.soft}, ${U.hm(Clock.norm(s))}, ${PARTS[part]}${late ? '. Het spoor koelt af' : ''}. Tik voor uitleg over de tijd.`;
-    let h = `<header class="sp-head">` +
-      `<div class="sp-brand"><h1 class="sp-title" data-ui="title">Het Spoor</h1><span class="sp-case" title="${U.esc(s.meta.title + ' — ' + s.meta.eraLabel + ', ' + s.world.city.name)}">${U.esc(s.meta.title)} · ${U.esc(s.world.city.name)}</span></div>` +
+    const badge = (n) => n > 0 ? `<span class="nav-badge" aria-label="${n} nieuw">+${n}</span>` : '';
+    return `<div class="sp-brand"><h1 class="sp-title" data-ui="title">Het Spoor</h1><span class="sp-case" title="${U.esc(s.meta.title + ' — ' + s.meta.eraLabel + ', ' + s.world.city.name)}">${U.esc(s.meta.title)} · ${U.esc(s.world.city.name)}</span></div>` +
       `<nav class="sp-tabs" aria-label="Hoofdnavigatie">` +
-      tabs.map((t) => `<button type="button" data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}</button>`).join('') +
+      tabs.map((t) => `<button type="button" data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}${badge(t[2])}</button>`).join('') +
       `</nav>` +
       `<div class="sp-status">` +
         `<button type="button" class="sp-clock${part >= DAY.parts ? ' night' : ''}${late ? ' late' : ''}" data-ui="budgethelp" aria-label="${U.esc(clockAria)}">Dag ${s.clock.day} · <b>${U.hm(Clock.norm(s))}</b> · ${PARTS[part]} <span class="sp-help" aria-hidden="true">?</span></button>` +
         actHtml +
       `</div>` +
       `<div class="sp-tools">` +
-        `<button type="button" data-ui="journal">Dagboek</button>` +
+        `<button type="button" data-ui="journal">Dagboek${badge(newJournal)}</button>` +
         `<button type="button" data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}>Zaakverslag</button>` +
         `<button type="button" data-ui="system">Systeem</button>` +
         `<button type="button" class="sp-icon-btn" data-ui="mute" aria-pressed="${!SFX.muted}" aria-label="${SFX.muted ? 'Geluid aanzetten' : 'Geluid uitzetten'}" title="${SFX.muted ? 'Geluid staat uit' : 'Geluid staat aan'}">${SFX.muted ? '🔇' : '🔊'}</button>` +
-      `</div></header>`;
-    h += `<main id="main" class="sp-main" data-fam="${fam}">${this.view(s, fam)}</main>`;
-    const coach = this.coachPick(); if (coach) h += this.coachHtml(coach);
-    root.innerHTML = h;
-    if (this.tab === 'board') this.fit();
+      `</div>`;
+  },
+  boardContentKey(s, fam) {
+    const L = Board.layout(s);
+    this._boardLayout = L;
+    const p = s.player || {};
+    return [
+      'board', this.boardMode, fam, Level.id(s), this.link || '', this.threadKind,
+      L.cards.map((c) => c.id + ':' + c.kind + ':' + (Pins.mark(s, c.id) || '')).join(','),
+      Board.folders(s).map((f) => f.zone + ':' + f.n).join(','),
+      L.threads.map((t) => t.a + '-' + t.b + '-' + t.kind + '-' + (t.meaning || '')).join(','),
+      JSON.stringify(p.notes || {}),
+      JSON.stringify(s.play.cleared || {}),
+      JSON.stringify(s.play.debunked || {}),
+      JSON.stringify(s.play.resolved || {}),
+      this.boardMode === 'matrix' ? JSON.stringify(s.play.asked || {}) + JSON.stringify(s.play.alibiCheck || {}) : ''
+    ].join('|');
+  },
+  renderHead(s, sh) {
+    const hh = this.headHtml(s);
+    if (this._headHtml !== hh) {
+      sh.head.innerHTML = hh;
+      this._headHtml = hh;
+    }
+  },
+  renderDrawer(s, fam, sh) {
+    let html = '', isFeed = false, dId = null;
+    if (this.tab === 'board') {
+      if (this.link) { html = Board.linkPanel(s, this.link, this.threadKind); dId = 'link:' + this.link; }
+      else if (this.sel) { html = Board.detail(s, this.sel, fam); dId = 'card:' + this.sel; }
+      else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
+    } else if (this.tab === 'map') {
+      if (this.stn) { html = this.stnDetail(s, this.stn); dId = 'stn:' + this.stn; }
+      else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
+    }
+    const hadDrawer = !sh.drawer.hidden;
+    sh.drawer.classList.toggle('sp-feed', isFeed);
+    sh.drawer.hidden = !html;
+    sh.stage.classList.toggle('drawer', !!html);
+    if (this._drawerHtml !== html) {
+      const sameTarget = dId && dId === this._drawerId;
+      const prevScroll = sameTarget ? sh.drawer.scrollTop : 0;
+      sh.drawer.innerHTML = html;
+      this._drawerHtml = html;
+      this._drawerId = dId;
+      sh.drawer.scrollTop = prevScroll;
+    }
+    if (hadDrawer !== !!html && this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads();
+  },
+  renderStage(s, fam, sh) {
+    if (this.tab === 'visit' && s.visit) {
+      this.stopBoardObserver();
+      const v = s.visit;
+      if (v.conv && typeof Interrogation !== 'undefined') {
+        const ivKey = 'iv:' + v.conv + ':' + s.play.logN + ':' + (this.showEv ? '1' : '0') + ':' + JSON.stringify(this.deltas || {}) + ':' +
+          Object.keys(s.play.found).length + ':' + Object.keys(s.play.resolved).length + ':' + (v.used[v.conv] || []).length + ':' + s.player.money + ':' + fam;
+        if (this._stageKey === ivKey && sh.stage.querySelector('.iv')) {
+          this.patchIvApproach(sh);
+          return;
+        }
+        const prevLeft = sh.stage.querySelector('.iv-left'), leftTop = prevLeft ? prevLeft.scrollTop : 0;
+        sh.stage.innerHTML = Interrogation.html(s, fam, { approach: this.approach, deltas: this.deltas || {}, showEvidence: !!this.showEv });
+        const nextLeft = sh.stage.querySelector('.iv-left'); if (nextLeft) nextLeft.scrollTop = leftTop;
+        const log = sh.stage.querySelector('.iv-log'); if (log) log.scrollTop = log.scrollHeight;
+        this._stageKey = ivKey;
+        return;
+      }
+      const tvKey = 'tv:' + v.locId + ':' + s.clock.part + ':' + Clock.norm(s) + ':' + Object.keys(v.done).length + ':' +
+        Object.keys(s.play.found).length + ':' + Object.keys(s.play.early || {}).length + ':' + Object.keys(s.play.examined || {}).length + ':' + this.feed.length + ':' + fam;
+      if (this._stageKey === tvKey && sh.stage.querySelector('.tv-canvas')) {
+        this.patchTableauHotspot(s, fam, sh);
+        return;
+      }
+      const prevSide = sh.stage.querySelector('.tv-side'), sideTop = prevSide ? prevSide.scrollTop : 0;
+      sh.stage.innerHTML = this.visitView(s, fam);
+      const nextSide = sh.stage.querySelector('.tv-side'); if (nextSide) nextSide.scrollTop = sideTop;
+      this._stageKey = tvKey;
+      return;
+    }
+
+    if (this.tab === 'map') {
+      this.stopBoardObserver();
+      const mapKey = 'map:' + s.seed + ':' + s.clock.part + ':' + s.pos + ':' + Object.keys(s.play.met).length + ':' +
+        Object.keys(s.play.metCrowd || {}).length + ':' + Object.keys(s.play.visited).length + ':' + Object.keys(s.play.heardOfLoc || {}).length + ':' + fam;
+      if (this._stageKey === mapKey && sh.stage.querySelector('.mv svg')) {
+        this.patchMapSelection(sh);
+        return;
+      }
+      sh.stage.innerHTML = `<div class="mv">${MapGen.svg(s, this.map(), s.clock.part, this.stn)}</div>`;
+      this._stageKey = mapKey;
+      return;
+    }
+
+    // Zaakbord (Prikbord or Verdachtenoverzicht)
+    const bKey = this.boardContentKey(s, fam);
+    if (this._stageKey === bKey && ((this.boardMode === 'board' && sh.stage.querySelector('.bd')) || (this.boardMode === 'matrix' && sh.stage.querySelector('.mx-wrap')))) {
+      this.patchBoardSelection(s, sh);
+      return;
+    }
+    const prevBw = sh.stage.querySelector('.bw'), bwTop = prevBw ? prevBw.scrollTop : 0, bwLeft = prevBw ? prevBw.scrollLeft : 0;
+    const res = Board.html(s, fam, this.sel, this.link, { mode: this.boardMode, threadKind: this.threadKind });
+    this._boardLayout = res.L;
+    sh.stage.innerHTML = `<div class="bw">${res.html}</div>`;
+    const nextBw = sh.stage.querySelector('.bw');
+    if (nextBw) { nextBw.scrollTop = bwTop; nextBw.scrollLeft = bwLeft; }
+    this._stageKey = bKey;
+    if (this.boardMode === 'board') { this.observeBoard(); this.scheduleThreads(); }
+    else this.stopBoardObserver();
+  },
+  renderCoach(sh) {
+    const coach = this.coachPick();
+    const ch = coach ? this.coachHtml(coach) : '';
+    if (this._coachHtml !== ch) {
+      document.querySelectorAll('#app .coach-on').forEach((el) => el.classList.remove('coach-on'));
+      sh.coach.innerHTML = ch;
+      this._coachHtml = ch;
+    }
     if (coach) this.placeCoach(coach);
-    const log = root.querySelector('.iv-log'); if (log) log.scrollTop = log.scrollHeight;
-    if (fk) { const el = root.querySelector(`[data-card="${fk}"],[data-stn="${fk}"],[data-hs="${fk}"]`); if (el) el.focus({ preventScroll: true }); }
+  },
+  // in-place patchers (no DOM teardown, scroll and focus preserved)
+  patchBoardSelection(s, sh) {
+    const stage = (sh && sh.stage) || (this._shell && this._shell.stage); if (!stage) return;
+    if (this.boardMode === 'matrix') {
+      stage.querySelectorAll('.mx-table tbody tr').forEach((tr) => {
+        const btn = tr.querySelector('[data-card]');
+        const on = !!(btn && btn.dataset.card === this.sel);
+        tr.classList.toggle('sel', on);
+        if (btn) btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      return;
+    }
+    const bd = stage.querySelector('.bd'); if (!bd) return;
+    const L = this._boardLayout || Board.layout(s), byId = {}; L.cards.forEach((c) => { byId[c.id] = c; });
+    const link = this.link && byId[this.link] ? this.link : null;
+    const sel = link || (this.sel && byId[this.sel] ? this.sel : null);
+    const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel ? Board.linked(s, L, sel) : null;
+    bd.classList.toggle('linking', !!link);
+    bd.classList.toggle('focus', !link && !!hl);
+    bd.querySelectorAll('.bc[data-card]').forEach((el) => {
+      const id = el.dataset.card, c = byId[id]; if (!c) return;
+      const isSel = sel === id, isHl = !!(hl && hl.has(id)), isNew = Pins.isNew(s, id);
+      el.classList.toggle('sel', isSel);
+      el.classList.toggle('hl', isHl);
+      el.classList.toggle('is-new', isNew);
+      el.setAttribute('aria-pressed', isSel ? 'true' : 'false');
+      el.setAttribute('aria-label', Board.cardAria(s, c, sel, L));
+      if (!isNew) {
+        const nb = el.querySelector('.bc-new'); if (nb) nb.remove();
+        const wrap = el.querySelector('.bc-badges'); if (wrap && !wrap.children.length) wrap.remove();
+      }
+    });
+    const seenBtn = stage.querySelector('.bd-seen-btn');
+    const newN = Pins.newIds(s).length;
+    if (seenBtn) {
+      if (newN > 0) seenBtn.textContent = `Alles gezien (${newN})`;
+      else seenBtn.remove();
+    }
+    this.scheduleThreads();
+  },
+  patchMapSelection(sh) {
+    const stage = (sh && sh.stage) || (this._shell && this._shell.stage); if (!stage) return;
+    stage.querySelectorAll('.stn[data-stn]').forEach((g) => {
+      const on = g.dataset.stn === this.stn;
+      g.classList.toggle('sel', on);
+      g.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  },
+  patchTableauHotspot(s, fam, sh) {
+    const stage = (sh && sh.stage) || (this._shell && this._shell.stage); if (!stage) return;
+    const canvas = stage.querySelector('.tv-canvas'); if (!canvas) return;
+    const oldPop = canvas.querySelector('.tv-pop'); if (oldPop) oldPop.remove();
+    const loc = World.here(s), part = s.clock.part, M = Tableau.model(s, loc.id, part);
+    const popHtml = this.tableauPop(s, fam, M);
+    if (popHtml) canvas.insertAdjacentHTML('beforeend', popHtml);
+    stage.querySelectorAll('.tv-side .sp-chip[data-hs]').forEach((b) => {
+      b.classList.toggle('on', b.dataset.hs === this.hot);
+    });
+    stage.querySelectorAll('g[data-hs]').forEach((g) => {
+      g.classList.toggle('sel', g.dataset.hs === this.hot);
+    });
+  },
+  patchIvApproach(sh) {
+    const stage = (sh && sh.stage) || (this._shell && this._shell.stage); if (!stage) return;
+    stage.querySelectorAll('.iv-bar [data-ui="approach"]').forEach((b) => {
+      const on = b.dataset.v === this.approach;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  },
+  // dynamic SVG thread underlay measured from actual DOM card rectangles
+  stopBoardObserver() {
+    if (this._boardRO) { try { this._boardRO.disconnect(); } catch (e) {} this._boardRO = null; }
+    if (this._rafThreads && typeof cancelAnimationFrame === 'function') { cancelAnimationFrame(this._rafThreads); this._rafThreads = 0; }
+  },
+  observeBoard() {
+    this.stopBoardObserver();
+    if (typeof ResizeObserver === 'undefined') return;
+    const bd = $('#app .bd'); if (!bd) return;
+    this._boardRO = new ResizeObserver(() => this.scheduleThreads());
+    this._boardRO.observe(bd);
+  },
+  scheduleThreads() {
+    if (typeof requestAnimationFrame === 'function') {
+      if (this._rafThreads) cancelAnimationFrame(this._rafThreads);
+      this._rafThreads = requestAnimationFrame(() => { this._rafThreads = 0; this.drawThreads(); });
+    } else {
+      this.drawThreads();
+    }
+  },
+  drawThreads() {
+    const s = this.s; if (!s || this.screen || this.tab !== 'board' || this.boardMode !== 'board') return;
+    const bd = $('#app .bd'), svg = bd && bd.querySelector('svg.bt'); if (!bd || !svg) return;
+    const br = bd.getBoundingClientRect ? bd.getBoundingClientRect() : null;
+    if (!br || !br.width || !br.height) return;
+    const W = Math.max(1, Math.round(bd.scrollWidth || br.width)), H = Math.max(1, Math.round(bd.scrollHeight || br.height));
+    const rects = {};
+    bd.querySelectorAll('.bc[data-card]').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      rects[el.dataset.card] = { x: r.left - br.left, y: r.top - br.top, w: r.width, h: r.height };
+    });
+    const L = this._boardLayout || Board.layout(s), byId = {}; L.cards.forEach((c) => { byId[c.id] = c; });
+    const link = this.link && byId[this.link] ? this.link : null;
+    const sel = link || (this.sel && byId[this.sel] ? this.sel : null);
+    const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel ? Board.linked(s, L, sel) : null;
+    let paths = '', dots = '';
+    if (hl && sel && !link && rects[sel]) {
+      const e = Evidence.get(s, sel.slice(2));
+      if (e) e.requires.forEach((r) => {
+        const tid = rects['d:' + r] ? 'd:' + r : rects['s:' + r] ? 's:' + r : null;
+        if (tid) paths += `<path class="req hl" d="${Board.path(Board.anchorRect(rects[sel], rects[tid]), Board.anchorRect(rects[tid], rects[sel]), 'req')}"/>`;
+      });
+    }
+    L.threads.forEach((t) => {
+      const ra = rects[t.a], rb = rects[t.b]; if (!ra || !rb) return;
+      const p1 = Board.anchorRect(ra, rb), p2 = Board.anchorRect(rb, ra);
+      const on = !!(hl && hl.has(t.a) && hl.has(t.b));
+      const mCls = t.kind === 'mine' ? ' m-' + (t.meaning || 'verband') : '';
+      paths += `<path class="${t.kind}${mCls}${on ? ' hl' : ''}" d="${Board.path(p1, p2, t.kind)}"/>`;
+      if (t.kind !== 'said') {
+        const dCls = 'pt-' + (t.kind === 'mine' ? (t.meaning || 'verband') : t.kind) + (on ? ' hl' : '');
+        dots += `<circle class="${dCls}" cx="${p1[0].toFixed(1)}" cy="${p1[1].toFixed(1)}" r="4"/><circle class="${dCls}" cx="${p2[0].toFixed(1)}" cy="${p2[1].toFixed(1)}" r="4"/>`;
+      }
+    });
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width', String(W));
+    svg.setAttribute('height', String(H));
+    svg.innerHTML = paths + dots;
+  },
+  render(keepFocus) {
+    if (this.screen) return this.renderScreen();
+    const s = this.s, root = $('#app'); if (!s) return;
+    clearTimeout(this.typeTimer);
+    const focusSel = keepFocus ? this.captureFocus() : null;
+    const fam = famOf(s), part = s.clock.part;
+    root.dataset.part = String(Math.min(part, 3));
+    const sh = this.ensureShell();
+    sh.main.dataset.fam = fam;
+    this.renderHead(s, sh);
+    this.renderStage(s, fam, sh);
+    this.renderDrawer(s, fam, sh);
+    this.renderCoach(sh);
+    if (focusSel) this.restoreFocus(focusSel);
   },
   // v0.6.5 (voorstel 11): a tap on the map selects a place first; this drawer replaces the hover tooltips and
   // prevents a mis-tap from opening a visit (which costs a part of the day)
@@ -363,7 +653,7 @@ const UI = {
     if (v && v.locId === l.id) tags.push('Hier ben je nu.');
     const present = open && !night ? s.cast.concat(s.crowd).filter((n) => Schedule.at(s, n.id, s.clock.day, part) === l.id) : [];
     const known = present.filter((n) => People.known(s, n.id)).sort(byName), unk = present.length - known.length;
-    let h = `<button class="sp-x" data-ui="stnx">Sluiten</button><h3>${U.esc(l.name)}</h3><p class="sp-note">${U.esc(l.description)}</p>`;
+    let h = `<button type="button" class="sp-x" data-ui="stnx">Sluiten</button><h3>${U.esc(l.name)}</h3><p class="sp-note">${U.esc(l.description)}</p>`;
     if (tags.length) h += `<p>${tags.map(U.esc).join(' ')}</p>`;
     h += `<h4>Openingstijden</h4><p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + l.open[0] + ' tot ' + l.open[1] + ' uur.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open, in de ' + PARTS[part] + '.' : 'Nu dicht, in de ' + PARTS[part] + '.'}</p>`;
     if (open && !night) {
@@ -371,14 +661,14 @@ const UI = {
       h += known.length ? `<ul>${known.map((n) => `<li>${U.esc(n.name)}, ${U.esc(String(n.role).replace(/ \(.*\)$/, ''))}${People.isCore(s, n.id) ? '' : ' (bijfiguur)'}</li>`).join('')}</ul>` : '';
       h += unk > 0 ? `<p class="sp-note">${unk === 1 ? 'Eén persoon' : unk + ' mensen'} die je nog niet gesproken hebt.</p>` : (known.length ? '' : '<p class="sp-note">Niemand aanwezig.</p>');
     }
-    if (v && v.locId === l.id) h += `<button class="sp-btn go wide" data-ui="tab" data-v="visit">Terug naar het bezoek</button>`;
+    if (v && v.locId === l.id) h += `<button type="button" class="sp-btn go wide" data-ui="tab" data-v="visit">Terug naar het bezoek</button>`;
     else if (v) h += `<p class="sp-note">Je bent nog in ${U.esc(World.here(s).name)}. Vertrek eerst.</p>`;
     else if (night) h += `<p class="sp-note">Sluit de dag af om morgen verder te gaan.</p>`;
     else { const T = Travel.check(s, l.id);
-      if (T.late) h += `<button class="sp-btn wide" disabled>Te laat: je bent er pas om ${U.hm(T.at)}</button>`;
-      else if (!T.open) h += `<button class="sp-btn wide" disabled>Dicht als je aankomt (${U.hm(T.at)}, ${PARTS[T.part]})</button>`;
-      else if (T.here) h += `<button class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar binnen in ${U.esc(l.name)}</button>`;
-      else h += `<button class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar ${U.esc(l.name)} (${T.walk} min lopen, aankomst ${U.hm(T.at)})</button>`; }
+      if (T.late) h += `<button type="button" class="sp-btn wide" disabled>Te laat: je bent er pas om ${U.hm(T.at)}</button>`;
+      else if (!T.open) h += `<button type="button" class="sp-btn wide" disabled>Dicht als je aankomt (${U.hm(T.at)}, ${PARTS[T.part]})</button>`;
+      else if (T.here) h += `<button type="button" class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar binnen in ${U.esc(l.name)}</button>`;
+      else h += `<button type="button" class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar ${U.esc(l.name)} (${T.walk} min lopen, aankomst ${U.hm(T.at)})</button>`; }
     return h;
   },
   dossierReady() { const f = Evidence.found(this.s); return f.some((e) => e.slot === 'motive') && f.some((e) => e.slot === 'method') && !this.s.play.ended; },
@@ -386,24 +676,41 @@ const UI = {
   feedLines() { return this.feed.slice(-8).map((m) => `<p class="${m.k === 's' ? 'sys' : ''}">${m.who ? '<b>' + U.esc(m.who) + ':</b> ' : ''}${U.esc(m.text)}</p>`).join(''); },
   feedHtml(cls) {
     if (!this.feed.length) return '';
-    if (cls === 'drawer') return `<aside class="sp-drawer sp-feed"><button class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}</aside>`;
+    if (cls === 'drawer') return `<aside class="sp-drawer sp-feed"><button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}</aside>`;
     return `<div class="${cls}">${this.feedLines()}</div>`;
   },
-  view(s, fam) {
-    if (this.tab === 'visit' && s.visit) return this.visitView(s, fam);
-    const side = this.link && this.tab === 'board' ? `<aside class="sp-drawer">${Board.linkPanel(s, this.link)}</aside>` : this.sel && this.tab === 'board' ? `<aside class="sp-drawer">${Board.detail(s, this.sel, fam)}</aside>` : this.feedHtml('drawer');
-    if (this.tab === 'map') {
-      const mside = this.stn ? `<aside class="sp-drawer">${this.stnDetail(s, this.stn)}</aside>` : side;
-      return `<div class="mv${mside ? ' drawer' : ''}">${MapGen.svg(s, this.map(), s.clock.part, this.stn)}</div>` + mside;
+  tableauPop(s, fam, M) {
+    const v = s.visit, sel = M.hs.find((x) => x.id === this.hot);
+    if (!sel) return '';
+    const cx = sel.kind === 'obj' ? sel.box.x + sel.box.w / 2 : sel.x;
+    const cy = sel.kind === 'obj' ? sel.box.y + sel.box.h / 2 : sel.y - 135 * sel.k;
+    const px = Math.max(16, Math.min(84, (cx / 960) * 100)).toFixed(1);
+    const py = Math.max(14, Math.min(82, (cy / 540) * 100)).toFixed(1);
+    let inner = `<button type="button" class="tv-pop-x" data-ui="hotx" aria-label="Sluiten">×</button>`;
+    const rest = Clock.left(s), can = (k) => Level.cost(s, k) <= rest, mins = (k) => ' (' + Level.cost(s, k) + ' min)', outBtn = '<button type="button" class="sp-act" disabled>Daar is het te laat voor</button>';
+    if (sel.kind !== 'obj') {
+      const x = sel.ref, core = sel.kind === 'npc', known = People.known(s, x.id), label = Tableau.label(sel, s, M);
+      if (!known) {
+        inner += `<b>${U.esc(label)}</b><p class="sp-note">Je weet nog niet wie dit is.</p>` + (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('greet') ? `<button type="button" class="sp-act live" data-ui="greet" data-v="${x.id}">Aanspreken${mins('greet')}</button>` : outBtn);
+      } else if (core) {
+        const tone = Rels.toneOf(s, x.id);
+        inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}</span></div></div>` +
+          (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('talk') ? `<button type="button" class="sp-act live" data-ui="talk" data-v="${x.id}">Verhoren${mins('talk')}</button>` : outBtn);
+      } else {
+        inner += `<b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role)}, niet betrokken bij de zaak</span>` +
+          (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('mingle') ? `<button type="button" class="sp-act live" data-ui="mingle" data-v="${x.id}">Even praten${mins('mingle')}</button>` : outBtn);
+      }
+    } else {
+      const clue = s.evidence.find((e) => e.source.objectId === sel.ref.id && s.play.found[e.id]);
+      const early = !clue && s.play.early && s.play.early[sel.ref.id], seen = !clue && !early && s.play.examined && s.play.examined[sel.ref.id];
+      inner += `<b>${U.esc(Rnd.cap(sel.ref.name))}</b>` +
+        (clue ? `<p class="sp-note">Gevonden: <b>${U.esc(clue.title)}</b></p>`
+          : early ? `<p class="sp-note"><b>Opvallend (?)</b>: Kom hier later terug zodra je meer weet.</p>`
+          : seen ? `<p class="sp-note">Hier heb je al gekeken.</p>` : `<p class="sp-note">Van dichtbij bekijken</p>`) +
+        (clue || seen ? '' : can('examine') ? `<button type="button" class="sp-act live" data-ui="examine" data-v="${sel.ref.id}">${early ? 'Opnieuw onderzoeken' : 'Onderzoeken'}${mins('examine')}</button>` : outBtn);
     }
-    return `<div class="bw${side ? ' drawer' : ''}">${Board.html(s, fam, this.sel, this.link).html}</div>` + side;
+    return `<div class="tv-pop" style="left:${px}%;top:${py}%">${inner}</div>`;
   },
-  fit() {
-    const w = $('#app .bw'), b = $('#app .bd'); if (!w || !b) return;
-    const k = Math.min(w.clientWidth / Board.W, w.clientHeight / Board.H) * 0.98;
-    b.style.transform = `translate(${((w.clientWidth - Board.W * k) / 2).toFixed(1)}px, ${((w.clientHeight - Board.H * k) / 2).toFixed(1)}px) scale(${k.toFixed(4)})`;
-  },
-// Vervang UI.visitView(s, fam) in ui.js door deze versie met de In-Scene Popover op het Tableau (Optie B):
   visitView(s, fam) {
     const v = s.visit;
     if (v && v.conv && typeof Interrogation !== 'undefined') {
@@ -413,42 +720,8 @@ const UI = {
         showEvidence: !!this.showEv
       });
     }
-    const loc = World.here(s), part = s.clock.part, M = Tableau.model(s, loc.id, part), sel = M.hs.find((x) => x.id === this.hot);
-    let pop = '';
-    if (sel) {
-      // Bereken positie (in %) op het 960x540 tableau met rand-beveiliging
-      const cx = sel.kind === 'obj' ? sel.box.x + sel.box.w / 2 : sel.x;
-      const cy = sel.kind === 'obj' ? sel.box.y + sel.box.h / 2 : sel.y - 135 * sel.k;
-      const px = Math.max(16, Math.min(84, (cx / 960) * 100)).toFixed(1);
-      const py = Math.max(14, Math.min(82, (cy / 540) * 100)).toFixed(1);
-      let inner = `<button class="tv-pop-x" data-ui="hotx" aria-label="Sluiten">×</button>`;
-      // v0.12.0: every button shows its minutes; a stranger costs the same whoever it is
-      const rest = Clock.left(s), can = (k) => Level.cost(s, k) <= rest, mins = (k) => ' (' + Level.cost(s, k) + ' min)', outBtn = '<button class="sp-act" disabled>Daar is het te laat voor</button>';
-      if (sel.kind !== 'obj') {
-        // v0.8.0 (nieuw A): until you speak to someone, you only see what anyone could see
-        const x = sel.ref, core = sel.kind === 'npc', known = People.known(s, x.id), label = Tableau.label(sel, s, M);
-        if (!known) {
-          inner += `<b>${U.esc(label)}</b><p class="sp-note">Je weet nog niet wie dit is.</p>` + (v.done[x.id] ? `<button class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('greet') ? `<button class="sp-act live" data-ui="greet" data-v="${x.id}">Aanspreken${mins('greet')}</button>` : outBtn);
-        } else if (core) {
-          const tone = Rels.toneOf(s, x.id);
-          inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}</span></div></div>` +
-            (v.done[x.id] ? `<button class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('talk') ? `<button class="sp-act live" data-ui="talk" data-v="${x.id}">Verhoren${mins('talk')}</button>` : outBtn);
-        } else {
-          inner += `<b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role)}, niet betrokken bij de zaak</span>` +
-            (v.done[x.id] ? `<button class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('mingle') ? `<button class="sp-act live" data-ui="mingle" data-v="${x.id}">Even praten${mins('mingle')}</button>` : outBtn);
-        }
-      } else {
-        const clue = s.evidence.find((e) => e.source.objectId === sel.ref.id && s.play.found[e.id]);
-        const early = !clue && s.play.early && s.play.early[sel.ref.id], seen = !clue && !early && s.play.examined && s.play.examined[sel.ref.id];
-        inner += `<b>${U.esc(Rnd.cap(sel.ref.name))}</b>` +
-          (clue ? `<p class="sp-note">Gevonden: <b>${U.esc(clue.title)}</b></p>`
-            : early ? `<p class="sp-note"><b>Opvallend (?)</b>: Kom hier later terug zodra je meer weet.</p>`
-            : seen ? `<p class="sp-note">Hier heb je al gekeken.</p>` : `<p class="sp-note">Van dichtbij bekijken</p>`) +
-          (clue || seen ? '' : can('examine') ? `<button class="sp-act live" data-ui="examine" data-v="${sel.ref.id}">${early ? 'Opnieuw onderzoeken' : 'Onderzoeken'}${mins('examine')}</button>` : outBtn);
-      }
-      pop = `<div class="tv-pop" style="left:${px}%;top:${py}%">${inner}</div>`;
-    }
-
+    const loc = World.here(s), part = s.clock.part, M = Tableau.model(s, loc.id, part);
+    const pop = this.tableauPop(s, fam, M);
     // v0.12.0: the clock of this part of the day; at its end people move on
     const now = Clock.norm(s), p0 = PART_START[part], p1 = Clock.partEnd(part), pct = Math.round(100 * (now - p0) / (p1 - p0));
     let side = `<h3>${U.esc(loc.name)}</h3><p class="sp-note">${U.esc(loc.description)}</p>` +
@@ -460,7 +733,7 @@ const UI = {
     const hasClue = (x) => x.kind === 'obj' && s.evidence.some((e) => e.source.objectId === x.ref.id && s.play.found[e.id]);
     const isEarly = (x) => x.kind === 'obj' && !hasClue(x) && s.play.early && s.play.early[x.ref.id];
     const seen = (x) => x.kind === 'obj' && !hasClue(x) && !isEarly(x) && s.play.examined && s.play.examined[x.ref.id];
-    const chip = (x) => `<button class="sp-chip${this.hot === x.id ? ' on' : ''}${hasClue(x) || seen(x) || (x.kind !== 'obj' && v.done[x.ref.id]) ? ' done' : ''}${isEarly(x) ? ' early' : ''}" data-hs="${x.id}">${U.esc(Tableau.label(x, s, M))}</button>`;
+    const chip = (x) => `<button type="button" class="sp-chip${this.hot === x.id ? ' on' : ''}${hasClue(x) || seen(x) || (x.kind !== 'obj' && v.done[x.ref.id]) ? ' done' : ''}${isEarly(x) ? ' early' : ''}" data-hs="${x.id}">${U.esc(Tableau.label(x, s, M))}</button>`;
     const ppl = M.hs.filter((x) => x.kind !== 'obj'), objs = M.hs.filter((x) => x.kind === 'obj');
     side += `<h4>Aanwezig in ${U.esc(loc.name)}</h4>${ppl.length ? `<div class="sp-chips">${ppl.map(chip).join('')}</div>` : '<p class="sp-note">Niemand aanwezig.</p>'}` +
       `<h4>Voorwerpen</h4><div class="sp-chips">${objs.map(chip).join('')}</div>`;
@@ -473,6 +746,7 @@ const UI = {
     const T = Travel.check(s, locId);
     if (T.late) return this.toast('Je komt pas om ' + U.hm(T.at) + ' aan in ' + loc.name + '. Dat is te laat voor vandaag.');
     if (!T.open) return this.toast(loc.name + ' is dicht in de ' + PARTS[T.part] + (T.part !== s.clock.part ? ', als je er om ' + U.hm(T.at) + ' aankomt' : '') + '.');
+    if (this.tab === 'board' && Act.see(s)) Store.put('auto', Save.pack(s));
     this.sel = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.tab = 'visit';
     this.run((st) => Act.visit(st, locId));
   },
@@ -482,19 +756,50 @@ const UI = {
     if (this.screenAct(el)) return;
     const d = el.dataset, s = this.s; if (!s) return;
     const harbor = s.world.locations.some((l) => l.template === 'haven');
-    if (d.card && this.link) {   // v0.11.0: pulling threads; a tap on another card ties or unties it, a tap on the first card is done
+    if (d.card && this.link) {   // v0.11.0 / v0.14.0: pulling threads with optional meaning
       if (d.card === this.link) { SFX.paper(); this.sel = this.link; this.link = null; return this.render(true); }
-      if (Act.thread(s, this.link, d.card)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
+      if (Act.thread(s, this.link, d.card, this.threadKind)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
       return this.render(true);
     }
-    if (d.card) { SFX.pin(); this.sel = this.sel === d.card ? null : d.card; return this.render(true); }
+    if (d.card) {
+      SFX.pin();
+      this.sel = this.sel === d.card ? null : d.card;
+      if (this.sel && Act.see(s, this.sel)) Store.put('auto', Save.pack(s));
+      return this.render(true);
+    }
     if (d.stn) { SFX.pin(); this.stn = this.stn === d.stn ? null : d.stn; return this.render(true); }
     if (d.hs) { SFX.pin(); this.hot = this.hot === d.hs ? null : d.hs; return this.render(true); }
     const u = d.ui || d.sp;
     switch (u) {
-      case 'tab': SFX.paper(); this.tab = d.v; this.sel = null; this.link = null; this.stn = null; this.hot = null; return this.render();
+      case 'tab':
+        SFX.paper();
+        if (this.tab === 'board' && d.v !== 'board' && Act.see(s)) Store.put('auto', Save.pack(s));
+        this.tab = d.v; this.sel = null; this.link = null; this.stn = null; this.hot = null;
+        return this.render();
+      case 'bmode':
+        SFX.pin();
+        if (d.v === 'board' || d.v === 'matrix') { this.boardMode = d.v; if (d.v === 'matrix') this.link = null; }
+        return this.render(true);
+      case 'thkind':
+        SFX.pin();
+        if (Pins.THREAD_KINDS[d.v]) this.threadKind = d.v;
+        return this.render(true);
+      case 'seen-all':
+        SFX.pin();
+        if (Act.see(s)) Store.put('auto', Save.pack(s));
+        return this.render(true);
+      case 'mark':
+        if (Act.mark(s, d.id, d.v)) { SFX.pin(); Store.put('auto', Save.pack(s)); }
+        return this.render(true);
+      case 'noteclr':
+        if (Act.note(s, d.id, '')) { SFX.pin(); Store.put('auto', Save.pack(s)); }
+        this.render(true);
+        { const ni = $('#cardNote'); if (ni) ni.focus({ preventScroll: true }); }
+        return;
       case 'stnx': this.stn = null; return this.render();
-      case 'linkmode': SFX.pin(); this.link = d.v; this.sel = null; return this.render(true);
+      case 'linkmode':
+        SFX.pin(); this.boardMode = 'board'; this.link = d.v; this.sel = null;
+        return this.render(true);
       case 'linkdone': SFX.paper(); this.sel = this.link; this.link = null; return this.render(true);
       case 'unthread': SFX.pin(); if (Act.thread(s, d.a, d.b)) Store.put('auto', Save.pack(s)); return this.render(true);
       case 'arch': { const z = Pins.zone(d.v); if (!Act.archive(s, d.v, true)) return; SFX.paper(); this.sel = null; Store.put('auto', Save.pack(s)); this.toast('In ' + Pins.FOLDER[z] + ' gelegd. Via het mapje haal je de kaart terug.'); return this.render(); }
@@ -529,7 +834,7 @@ const UI = {
       }
       case 'talk': SFX.paper(); this.hot = null; this.feed = []; this.deltas = {}; this.showEv = false; return this.runConv((st) => Act.talkStart(st, d.v));
       case 'talkend': SFX.paper(); clearTimeout(this.typeTimer); this.hot = null; this.deltas = {}; this.showEv = false; this.feed = []; return this.run((st) => Act.talkEnd(st));
-      case 'approach': SFX.pin(); this.approach = d.v; return this.render();
+      case 'approach': SFX.pin(); this.approach = d.v; return this.render(true);
       case 'topic': SFX.paper(); return this.runConv((st) => Act.topic(st, st.visit.conv, d.v, this.approach));
       case 'confront': SFX.seal(); return this.runConv((st) => Act.confront(st, d.v));
       case 'treat': SFX.pin(); return this.runConv((st) => Act.treat(st, d.v));
@@ -557,7 +862,24 @@ const UI = {
       if (e.target.closest('[data-ui="title"]')) { this.taps++; clearTimeout(this.tt); this.tt = setTimeout(() => { this.taps = 0; }, 650); if (this.taps >= 3) { this.taps = 0; Debug.open(); } return; }
       const t = target(e); if (t && t.tagName !== 'SELECT') this.act(t);
     });
-    root.addEventListener('change', (e) => { if (e.target.dataset.ui === 'theme') { this.setTheme(e.target.value); this.render(); } });
+    // live one-line card note editing without re-rendering the drawer or losing input focus
+    root.addEventListener('input', (e) => {
+      const inp = e.target;
+      if (!inp || !inp.dataset || !inp.dataset.noteId || !this.s) return;
+      const id = inp.dataset.noteId;
+      Act.note(this.s, id, inp.value);
+      const val = Pins.note(this.s, id);
+      const cardNote = root.querySelector(`[data-card-note="${id}"]`);
+      if (cardNote) { cardNote.textContent = val; cardNote.hidden = !val; }
+      if (this.boardMode === 'board') this.scheduleThreads();
+      this._stageKey = null;
+      clearTimeout(this._noteSaveT);
+      this._noteSaveT = setTimeout(() => { if (this.s) Store.put('auto', Save.pack(this.s)); }, 250);
+    });
+    root.addEventListener('change', (e) => {
+      if (e.target.dataset.ui === 'theme') { this.setTheme(e.target.value); this.render(); }
+      if (e.target.dataset.noteId && this.s) { Store.put('auto', Save.pack(this.s)); if (this.boardMode === 'matrix') this.render(true); }
+    });
     document.addEventListener('keydown', (e) => {
       const modal = $('#modal');
       if (modal && !modal.hidden && e.key === 'Tab') {
@@ -568,7 +890,12 @@ const UI = {
           if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return; }
         }
       }
-      if (e.key === 'Escape') { if (modal && !modal.hidden) return this.close(); if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); } return; }
+      if (e.key === 'Escape') {
+        if (modal && !modal.hidden) return this.close();
+        if (document.activeElement && document.activeElement.id === 'cardNote') { document.activeElement.blur(); return; }
+        if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); }
+        return;
+      }
       const radio = e.target.closest && e.target.closest('#app [role="radio"][data-ui="st-level"]');
       if (radio && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) >= 0) {
         e.preventDefault();
@@ -585,7 +912,7 @@ const UI = {
       if (on) { svg.setAttribute('data-hot', '1'); const tag = svg.querySelector(`.tag[data-for="${g.dataset.hs}"]`); if (tag) tag.classList.add('show'); } };
     root.addEventListener('mouseover', (e) => hot(e, true)); root.addEventListener('focusin', (e) => hot(e, true));
     root.addEventListener('mouseout', (e) => hot(e, false));
-    window.addEventListener('resize', () => { if (this.screen) return; if (this.tab === 'board') this.fit(); const c = this.coachPick(); if (c) this.placeCoach(c); });
+    window.addEventListener('resize', () => { if (this.screen) return; if (this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads(); const c = this.coachPick(); if (c) this.placeCoach(c); });
   },
 
   /* ----- modals ----- */
@@ -648,6 +975,7 @@ const UI = {
   },
   journal(opt) {
     const s = this.s, p = s.play, fam = famOf(s);
+    if (Pins.journalNew(s) > 0) { Act.seeJournal(s); Store.put('auto', Save.pack(s)); if (this._shell) this.renderHead(s, this._shell); }
     const foundEv = Evidence.found(s), claims = s.contradictions.filter((c) => p.heard[c.id]);
     const met = s.cast.filter((n) => p.met[n.id]).slice().sort(byName);
     const figs = s.crowd.filter((c) => p.metCrowd && p.metCrowd[c.id]).slice().sort(byName);
@@ -878,8 +1206,8 @@ const UI = {
       const t = e.target.closest('button[data-x]'); if (!t) return;
       const x = t.dataset.x, v = t.dataset.v;
       if (x === 'theme') { SFX.pin(); this.setTheme(v); this.render(); return this.system({ keepScroll: true, focusSel: 'button[data-x="theme"][data-v="' + v + '"]' }); }
-      if (x === 'size') { SFX.pin(); this.setSize(v); if (this.tab === 'board') this.fit(); return this.system({ keepScroll: true, focusSel: 'button[data-x="size"][data-v="' + v + '"]' }); }
-      if (x === 'font') { SFX.pin(); this.setFont(v); return this.system({ keepScroll: true, focusSel: 'button[data-x="font"][data-v="' + v + '"]' }); }
+      if (x === 'size') { SFX.pin(); this.setSize(v); if (this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads(); return this.system({ keepScroll: true, focusSel: 'button[data-x="size"][data-v="' + v + '"]' }); }
+      if (x === 'font') { SFX.pin(); this.setFont(v); if (this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads(); return this.system({ keepScroll: true, focusSel: 'button[data-x="font"][data-v="' + v + '"]' }); }
       if (x === 'sound') { SFX.muted = (v === 'off'); this.savePrefs(); if (!SFX.muted) SFX.pin(); this.render(); return this.system({ keepScroll: true, focusSel: 'button[data-x="sound"][data-v="' + v + '"]' }); }
       if (x === 'save') { await Store.put('slot' + v, Save.pack(s)); this.toast('Opgeslagen in slot ' + v + '.'); this.system({ keepScroll: true }); }
       if (x === 'load') { const raw = await Store.get('slot' + v); if (!raw) return; try { this.close(); this.load(Save.unpack(raw)); this.toast('Slot ' + v + ' geladen.'); } catch (err) { this.toast(err.message, 9000); } }
