@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.12.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.12.1', schema: 8 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -754,10 +754,10 @@ const Evidence = {
     if (s.play.found[e.id]) return false;
     s.play.found[e.id] = { day: s.clock.day, part: s.clock.part, via: via, locationId: s.visit ? s.visit.locId : null };
     if (e.source && e.source.objectId && s.play.early) delete s.play.early[e.source.objectId];
-    // v0.12.0: threads and the archive mark of a blank object card move to the piece it turned out to hold
+    // v0.12.0: threads of a blank object card move to the piece it turned out to hold; new evidence always lands on the board (v0.12.1)
     if (e.source && e.source.objectId && s.player) { const from = 'o:' + e.source.objectId, to = 'd:' + e.id;
       if (Array.isArray(s.player.threads)) s.player.threads = s.player.threads.map((t) => t.map((x) => x === from ? to : x)).filter((t) => t[0] !== t[1]).map((t) => t[0] < t[1] ? t : [t[1], t[0]]);
-      if (s.player.archive && s.player.archive[from]) { delete s.player.archive[from]; s.player.archive[to] = true; } }
+      if (s.player.archive) { delete s.player.archive[from]; delete s.player.archive[to]; } }
     if (e.item) Log.sys(s, 'Je neemt ' + e.item + ' mee. Het komt als stuk op je zaakbord.');
     if (e.key === 'people_denial' && e.source.type === 'object') {   // v0.9.0: the document unmasks the lying companion
       const C = s.truth.culpritId, chk = s.play.alibiCheck && s.play.alibiCheck[C], liar = World.npc(s, s.truth.roles.companion), cul = World.npc(s, C);
@@ -1177,7 +1177,7 @@ const Act = {
   _open(s, loc) {
     s.visit = { locId: loc.id, conv: null, convAt: 0, done: {}, used: {} }; s.pos = loc.id;
     s.play.visits = (s.play.visits || 0) + 1;
-    if (!s.play.visited[loc.id]) { s.play.visited[loc.id] = true; Log.narr(s, loc.name + '. ' + loc.description); }
+    if (!s.play.visited[loc.id]) { s.play.visited[loc.id] = true; if (s.player && s.player.archive) delete s.player.archive['l:' + loc.id]; Log.narr(s, loc.name + '. ' + loc.description); }
     else Log.narr(s, 'Je bent terug in ' + loc.name + ', om ' + U.hm(Clock.norm(s)) + '.');
     this._done(s);
   },
@@ -1271,7 +1271,7 @@ const Act = {
     const kind = People.known(s, npcId) ? 'talk' : 'greet';
     if (!this._can(s, kind)) { this._done(s); return false; }
     s.visit.conv = npcId; s.visit.convAt = s.play.logN || 0;
-    if (!s.play.met[npcId]) { s.play.met[npcId] = true; Log.narr(s, npc.name + ', ' + npc.role + '. ' + Rnd.cap(npc.personality) + '; ' + npc.voice + '.'); }
+    if (!s.play.met[npcId]) { s.play.met[npcId] = true; if (s.player && s.player.archive) delete s.player.archive['p:' + npcId]; Log.narr(s, npc.name + ', ' + npc.role + '. ' + Rnd.cap(npc.personality) + '; ' + npc.voice + '.'); }
     else Log.narr(s, 'Je zoekt ' + npc.name + ' op.');
     this._tick(s, kind); s.turn++; return true;
   },
@@ -2150,6 +2150,51 @@ const Tests = {
         ev.requires.forEach((r) => { s.play.found[r] = { day: 1 }; }); Evidence.give(s, ev, 'object');
         objOk = !!o && o.kind === 'ghostdoc' && Pins.has(s, 'd:' + ev.id, 'p:' + pid) && !Pins.ok(s, 'o:' + ev.source.objectId); }
       return { ok: quiet && dupOk && objOk, info: (dup ? 'gedeelde voornaam getest' : 'geen gedeelde voornaam') + (ev ? ', voorwerp getest' : '') };
+    });
+    // ----- v0.12.1 (fase A): regression tests for archive, leaks, tableau overflow, dark-mode map -----
+    t('Zaakbord: een plaats selecteren licht nooit een nog niet ontmoete blanco persoon op (' + nSeeds + ' seeds)', () => {
+      const b2 = [];
+      for (let i = 0; i < nSeeds; i++) {
+        const s = Game.create('lnk-' + i, 'normaal'), n = s.cast[0], locId = n.locationId;
+        s.play.visited[locId] = true; s.play.heardOf[n.id] = { by: null, day: 1 };
+        const L = Board.layout(s), hl = Board.linked(s, L, 'l:' + locId);
+        if (hl.has('p:' + n.id)) b2.push('lnk-' + i);
+      }
+      return { ok: !b2.length, info: b2.slice(0, 3).join(', ') };
+    });
+    t('Archief: nieuw bewijs, nieuwe ontmoeting en nieuw bezoek komen altijd terug op het bord', () => {
+      const s = Game.create('unarch-1', 'normaal');
+      const ev = s.evidence.find((e) => e.source.type === 'object' && e.requires.length && e.route !== 'start');
+      const n = s.cast[0], loc = s.world.locations.find((l) => l.id !== s.startLoc);
+      s.play.heardOf[n.id] = { by: null, day: 1 }; s.play.heardOfLoc[loc.id] = { by: null };
+      if (ev) s.play.early[ev.source.objectId] = true;
+      Act.archive(s, 'p:' + n.id, true); Act.archive(s, 'l:' + loc.id, true);
+      if (ev) Act.archive(s, 'o:' + ev.source.objectId, true);
+      Act.force(s, loc.id);
+      const locBack = !Pins.archived(s, 'l:' + loc.id);
+      Act.leave(s);
+      this.meet(s, n.id); Act.talkStart(s, n.id);
+      const npcBack = !Pins.archived(s, 'p:' + n.id);
+      let evBack = true;
+      if (ev) { ev.requires.forEach((r) => { s.play.found[r] = { day: 1 }; }); Evidence.give(s, ev, 'object'); evBack = !Pins.archived(s, 'd:' + ev.id) && !Pins.archived(s, 'o:' + ev.source.objectId); }
+      return { ok: locBack && npcBack && evBack, info: [locBack, npcBack, evBack].join(', ') };
+    });
+    t('Tableau: ook bij grote avonddrukte (>11 mensen) blijft elke figuur binnen het 960 px beeld (' + nSeeds + ' seeds)', () => {
+      const b2 = []; let maxN = 0;
+      for (let i = 0; i < nSeeds; i++) {
+        const s = Game.create('ovf-' + i);
+        s.world.locations.forEach((l) => [0, 1, 2].forEach((p) => {
+          const M = Tableau.model(s, l.id, p), ppl = M.hs.filter((x) => x.kind !== 'obj');
+          if (ppl.length > maxN) maxN = ppl.length;
+          ppl.forEach((o) => { if (o.x - 40 * o.k < 0 || o.x + 40 * o.k > 960) b2.push('ovf-' + i + ' ' + l.id + ' x=' + o.x); });
+        }));
+      }
+      return { ok: !b2.length, info: b2.length ? b2.slice(0, 3).join(' | ') : 'max ' + maxN + ' mensen op één plek' };
+    });
+    t('Kaart: ondergrond gebruikt CSS-variabelen zodat donkere modus direct meebeweegt', () => {
+      const s = Game.create('darkmap-1'), bg = MapGen.ground(MapGen.build(s));
+      const hasVars = bg.indexOf('var(--map-street)') >= 0 && bg.indexOf('var(--map-water)') >= 0 && bg.indexOf('var(--map-house1)') >= 0;
+      return { ok: hasVars, info: hasVars ? 'CSS-variabelen actief' : 'ontbrekende variabelen' };
     });
     return out;
   }

@@ -287,7 +287,7 @@ const Board = {
     if (k === 'p') { const n = World.npc(s, ref), lk = (s.player && s.player.links) || {}, auto = Level.get(s).threads; add('l:' + n.locationId); s.evidence.forEach((e) => { if ((e.source.npcId === ref) || (auto ? e.pointsTo === ref : lk[e.id] === ref)) cardOf(e.id); }); s.contradictions.forEach((c) => { if (c.npcId === ref) add('s:' + c.id); }); }
     const e = (k === 'd' || k === 's') && Evidence.get(s, ref);
     if (e) { e.requires.forEach(cardOf); if (e.source.locationId) add('l:' + e.source.locationId); if (e.source.npcId) add('p:' + e.source.npcId); }
-    if (k === 'l') { s.evidence.forEach((x) => { if (x.source.locationId === ref) cardOf(x.id); }); s.cast.forEach((n) => { if (n.locationId === ref) add('p:' + n.id); }); }
+    if (k === 'l') { s.evidence.forEach((x) => { if (x.source.locationId === ref) cardOf(x.id); }); s.cast.forEach((n) => { if (n.locationId === ref && s.play.met[n.id]) add('p:' + n.id); }); }
     return out;
   },
   // a neutral head-and-shoulders outline; the same for everyone, so it never gives anything away
@@ -456,7 +456,7 @@ const Geo = {
   },
   d: (P) => 'M' + P.map((p) => p.x.toFixed(1) + ' ' + p.y.toFixed(1)).join(' L') + 'Z'
 };
-const MAP_INK = { house: ['#c9ad84', '#b99a72', '#d4bf98'], street: '#ebe3cf', casing: '#7a6850', lane: '#b9a983', water: '#89b8c9', shore: '#5f97a8', park: '#8fb873', tree: '#6e9856', treeLine: '#3b522f', field: ['#cfc58c', '#a9bf7a', '#d8c79a'], square: '#e6d9b8', block: '#d9cdb0' };
+const MAP_INK = { house: ['var(--map-house1)', 'var(--map-house2)', 'var(--map-house3)'], street: 'var(--map-street)', casing: 'var(--map-casing)', lane: 'var(--map-lane)', water: 'var(--map-water)', shore: 'var(--map-shore)', ripple: 'var(--map-ripple)', park: 'var(--map-park)', tree: 'var(--map-tree)', treeLine: 'var(--map-treeline)', field: ['var(--map-field1)', 'var(--map-field2)', 'var(--map-field3)'], hatch: 'var(--map-hatch)', square: 'var(--map-square)', block: 'var(--map-block)', quay: 'var(--map-quay)', boat: 'var(--map-boat)', stall: 'var(--map-stall)' };
 const MapGen = {
   W: 1200, H: 640, HALF: 6.5, LANE: 3,
   // story sites stay clear of the compass (top right) and the legend (bottom left)
@@ -636,7 +636,7 @@ const MapGen = {
   ground(M) {
     if (M.bg) return M.bg;
     const r = RNG.make(M.seed + '|paint'), W = M.W, H = M.H, wet = (x, y, pad) => M.water.wet(x, y, pad), I = MAP_INK;
-    let h = `<defs><pattern id="hs-field" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><line x1="0" y1="0" x2="0" y2="7" stroke="#8a7f50" stroke-opacity=".28" stroke-width="1.4"/></pattern></defs>`;
+    let h = `<defs><pattern id="hs-field" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><line x1="0" y1="0" x2="0" y2="7" stroke="${I.hatch}" stroke-opacity=".28" stroke-width="1.4"/></pattern></defs>`;
     const tree = (x, y, rad) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${rad}" fill="${I.tree}" fill-opacity=".6" stroke="${I.treeLine}" stroke-opacity=".5" stroke-width="1.1"/>`;
     const treesIn = (P, n, keep) => { let out = ''; const xs = P.map((p) => p.x), ys = P.map((p) => p.y), x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
       for (let k = 0, made = 0; k < n * 4 && made < n; k++) { const x = x0 + r.next() * (x1 - x0), y = y0 + r.next() * (y1 - y0); if (!Geo.inside({ x: x, y: y }, P) || wet(x, y, 6) || (keep && keep(x, y))) continue; out += tree(x, y, 5 + r.int(4)); made++; } return out; };
@@ -654,7 +654,7 @@ const MapGen = {
       if (c.type === 'square') { const Q = Geo.inset(c.P, this.HALF + 2); if (!Q) return; const m = Geo.centroid(Q);
         h += `<path d="${Geo.d(Q)}" fill="${I.square}" fill-opacity=".85" stroke="${I.casing}" stroke-opacity=".5" stroke-width="1.2" stroke-dasharray="3 3"/>`;
         Q.forEach((p) => { const t = Geo.lerp(p, m, 0.18); h += tree(t.x, t.y, 5); });
-        if (c.story && M.sites.some((p) => p.id === c.story && p.tpl === 'markt')) for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2, x = m.x + Math.cos(a) * 26, y = m.y + Math.sin(a) * 17; h += `<rect x="${(x - 5).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="10" height="8" fill="#e0b34a" fill-opacity=".8" stroke="#1f2933" stroke-opacity=".5" stroke-width="1"/>`; }
+        if (c.story && M.sites.some((p) => p.id === c.story && p.tpl === 'markt')) for (let k = 0; k < 6; k++) { const a = k / 6 * Math.PI * 2, x = m.x + Math.cos(a) * 26, y = m.y + Math.sin(a) * 17; h += `<rect x="${(x - 5).toFixed(1)}" y="${(y - 4).toFixed(1)}" width="10" height="8" fill="${I.stall}" fill-opacity=".8" stroke="var(--sp-ink)" stroke-opacity=".5" stroke-width="1"/>`; }
         else h += `<circle cx="${m.x.toFixed(1)}" cy="${m.y.toFixed(1)}" r="5" fill="${I.water}" fill-opacity=".7" stroke="${I.shore}" stroke-width="1.4"/>`;
       }
       if (c.type === 'park') { const Q = Geo.inset(c.P, this.HALF + 2); if (!Q) return; const m = Geo.centroid(Q), a = Geo.lerp(Q[0], Q[3], 0.5), b = Geo.lerp(Q[1], Q[2], 0.5);
@@ -665,7 +665,7 @@ const MapGen = {
     });
     // water above the land, streets above the water (bridges)
     M.water.polys.forEach((P) => { h += `<path d="${Geo.d(P)}" fill="${I.water}" fill-opacity=".55" stroke="${I.shore}" stroke-width="2.5" stroke-linejoin="round"/>`; });
-    for (let k = 0; k < 18; k++) { const x = 20 + r.next() * (W - 40), y = 20 + r.next() * (H - 40); if (wet(x, y, -8) && wet(x + 22, y, -8)) h += `<path d="M${x.toFixed(1)} ${y.toFixed(1)} q5.5 -3 11 0 t11 0" fill="none" stroke="#e3f0f3" stroke-opacity=".6" stroke-width="1.3"/>`; }
+    for (let k = 0; k < 18; k++) { const x = 20 + r.next() * (W - 40), y = 20 + r.next() * (H - 40); if (wet(x, y, -8) && wet(x + 22, y, -8)) h += `<path d="M${x.toFixed(1)} ${y.toFixed(1)} q5.5 -3 11 0 t11 0" fill="none" stroke="${I.ripple}" stroke-opacity=".6" stroke-width="1.3"/>`; }
     const line = (list) => list.map((e) => `M${e.a.x.toFixed(1)} ${e.a.y.toFixed(1)} L${e.b.x.toFixed(1)} ${e.b.y.toFixed(1)}`).join(' ');
     if (M.lanes.length) h += `<path d="${line(M.lanes)}" fill="none" stroke="${I.lane}" stroke-opacity=".9" stroke-width="${this.LANE * 2}" stroke-linecap="round"/><path d="${line(M.lanes)}" fill="none" stroke="${I.casing}" stroke-opacity=".35" stroke-width="1" stroke-dasharray="4 5"/>`;
     h += `<path d="${line(M.segs)}" fill="none" stroke="${I.casing}" stroke-opacity=".7" stroke-width="${this.HALF * 2}" stroke-linecap="round" stroke-linejoin="round"/>`;
@@ -680,8 +680,8 @@ const MapGen = {
       const col = Hex.mix(TEMPLATE_COLOR[p.tpl] || '#b89472', '#d8cfb8', 0.2);
       if (p.kind === 'quay') { const ux = Math.cos(p.dir), uy = Math.sin(p.dir), w = M.water; let d0 = 0; while (d0 < 120 && !w.wet(p.x + ux * d0, p.y + uy * d0)) d0 += 3;
         const a = { x: p.x + ux * (d0 - 4), y: p.y + uy * (d0 - 4) }, b = { x: p.x + ux * (d0 + 30), y: p.y + uy * (d0 + 30) };
-        h += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="#7a5a3a" stroke-width="7" stroke-linecap="square"/>`;
-        const bt = { x: b.x - uy * 13 - ux * 8, y: b.y + ux * 13 - uy * 8 }; if (w.wet(bt.x, bt.y, -4)) h += `<ellipse cx="${bt.x.toFixed(1)}" cy="${bt.y.toFixed(1)}" rx="11" ry="4.5" transform="rotate(${(p.dir * 180 / Math.PI).toFixed(1)} ${bt.x.toFixed(1)} ${bt.y.toFixed(1)})" fill="#a3563a" fill-opacity=".85" stroke="var(--sp-ink)" stroke-opacity=".6" stroke-width="1"/>`; }
+        h += `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" stroke="${I.quay}" stroke-width="7" stroke-linecap="square"/>`;
+        const bt = { x: b.x - uy * 13 - ux * 8, y: b.y + ux * 13 - uy * 8 }; if (w.wet(bt.x, bt.y, -4)) h += `<ellipse cx="${bt.x.toFixed(1)}" cy="${bt.y.toFixed(1)}" rx="11" ry="4.5" transform="rotate(${(p.dir * 180 / Math.PI).toFixed(1)} ${bt.x.toFixed(1)} ${bt.y.toFixed(1)})" fill="${I.boat}" fill-opacity=".85" stroke="var(--sp-ink)" stroke-opacity=".6" stroke-width="1"/>`; }
       if (p.kind === 'gate') { h += `<rect x="${(p.x - 16).toFixed(1)}" y="${(p.y - 16).toFixed(1)}" width="32" height="32" rx="3" fill="${col}" fill-opacity=".7" stroke="var(--sp-ink)" stroke-opacity=".5" stroke-width="1.2"/>`; }
       if (p.kind === 'lot' || p.kind === 'quay') { const c = p.cell, a = c ? Math.atan2(c.P[1].y - c.P[0].y, c.P[1].x - c.P[0].x) * 180 / Math.PI : 0;
         h += `<rect x="${(p.x - 21).toFixed(1)}" y="${(p.y - 15).toFixed(1)}" width="42" height="30" rx="2" transform="rotate(${a.toFixed(1)} ${p.x} ${p.y})" fill="${col}" fill-opacity=".8" stroke="var(--sp-ink)" stroke-opacity=".55" stroke-width="1.3"/>`; }
@@ -793,9 +793,19 @@ const Tableau = {
     const loc = World.loc(s, locId), open = World.openAt(loc, part), k = this.kindOf(loc.template), hs = [], at = (x) => Schedule.at(s, x.id, s.clock.day, part) === loc.id;
     // v0.8.0 (nieuw A): core people and figuranten share one shuffled line-up, so where someone stands says nothing
     const all = open ? s.cast.filter(at).concat(s.crowd.filter(at)).sort((a, b) => a.id.localeCompare(b.id)) : [], mix = Rnd.pickN(RNG.make(s.seed + '|stage|' + loc.id + '|' + s.clock.day + '|' + part), all, all.length);
+    const extra = Math.max(0, mix.length - 11);
     mix.forEach((x, i) => {
-      const core = People.isCore(s, x.id), front = i < 6, sl = front ? this.PEOPLE[k][i] : this.CROWD[k][(i - 6) % 5], j = front ? 0 : Math.floor((i - 6) / 5);
-      hs.push({ id: (core ? 'npc:' : 'crowd:') + x.id, kind: core ? 'npc' : 'crowd', ref: x, x: sl[0] + j * 36, y: sl[1], k: front ? 0.92 : 0.8, back: !front });
+      const core = People.isCore(s, x.id), front = i < 6;
+      let px, py, sc;
+      if (front) { const sl = this.PEOPLE[k][i]; px = sl[0]; py = sl[1]; sc = 0.92; }
+      else if (i < 11) { const sl = this.CROWD[k][i - 6]; px = sl[0]; py = sl[1]; sc = 0.8; }
+      else {
+        const ei = i - 11;
+        px = Math.round(78 + ((ei + 1) / (extra + 1)) * 804);
+        py = (k === 'outside' ? 430 : k === 'herberg' ? 414 : 424) + (ei % 2) * 14;
+        sc = 0.74;
+      }
+      hs.push({ id: (core ? 'npc:' : 'crowd:') + x.id, kind: core ? 'npc' : 'crowd', ref: x, x: px, y: py, k: sc, back: !front });
     });
     let free = 0;
     loc.objects.forEach((o) => {

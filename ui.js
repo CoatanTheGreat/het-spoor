@@ -75,7 +75,7 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', typeTimer: null, feed: [], theme: 'auto', oldRaw: null, mapCache: null, taps: 0, tt: null, bound: false,
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', typeTimer: null, feed: [], theme: 'auto', oldRaw: null, taps: 0, tt: null, bound: false,
   btn: (label, data, cls) => '<button class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
 
   async init() {
@@ -109,7 +109,7 @@ const UI = {
   },
   load(s) {
     clearTimeout(this.typeTimer);
-    this.s = s; this.mapCache = null; this.sel = null; this.link = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.feed = [];
+    this.s = s; this.sel = null; this.link = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.feed = [];
     this.tab = s.visit ? 'visit' : 'board';
     $('#app').hidden = false; this.after();
     const cm = s.meta.content; if (cm && cm.sig !== Content.sig) setTimeout(() => this.toast('Let op: dit spel is gestart met contentpakket "' + cm.name + '". Nu actief: "' + Content.cur.name + '". Nieuwe zinnen komen uit het actieve pakket.', 6000), 3500);
@@ -158,7 +158,6 @@ const UI = {
     return r;
   },
   // reveals the latest speaker strip line by line at the NPC's public voice pace
-// In UI.animateTranscript(npc): speel tijdvak-specifiek tikje bij elke regel die verschijnt:
   animateTranscript(npc) {
     clearTimeout(this.typeTimer);
     if (typeof Interrogation === 'undefined') return;
@@ -166,6 +165,11 @@ const UI = {
     if (!lastStrip) return;
     const lines = Array.from(lastStrip.querySelectorAll('.iv-line'));
     const fam = this.s ? famOf(this.s) : 'klassiek';
+    if (this.reduced()) {
+      const log = $('#app .iv-log');
+      if (log) log.scrollTop = log.scrollHeight;
+      return;
+    }
     SFX.type(fam);
     if (lines.length <= 1) return;
     const pace = Interrogation.pace(npc);
@@ -301,7 +305,7 @@ const UI = {
     let h = `<div class="sp-top"><h1 class="sp-title" data-ui="title">Het Spoor<small>${APP.version}</small></h1><nav class="sp-tabs">` +
       tabs.map((t) => `<button data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}</button>`).join('') +
       `</nav><div class="sp-tools"><button data-ui="journal">Dagboek</button><button data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}>Zaakverslag</button><button data-ui="system">Systeem</button></div></div>`;
-    const used = Clock.elapsed(s.clock), late = s.clock.day > DAY.soft;
+    const late = s.clock.day > DAY.soft;
     h += `<div class="sp-bar"><span class="sp-case">${U.esc(s.meta.title)}, ${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}</span>` +
       `<span class="sp-clock${part >= DAY.parts ? ' night' : ''}">Dag ${s.clock.day} · <b>${U.hm(Clock.norm(s))}</b> · ${PARTS[part]}</span>` +
       `<button class="sp-budget${late ? ' late' : ''}" data-ui="budgethelp" aria-label="Uitleg over de tijd">${late ? 'Het spoor koelt af' : 'Dag ' + s.clock.day + ' van ' + DAY.soft} <span class="sp-help" aria-hidden="true">?</span></button>`;
@@ -397,7 +401,7 @@ const UI = {
       const py = Math.max(14, Math.min(82, (cy / 540) * 100)).toFixed(1);
       let inner = `<button class="tv-pop-x" data-ui="hotx" aria-label="Sluiten">×</button>`;
       // v0.12.0: every button shows its minutes; a stranger costs the same whoever it is
-      const rest = Clock.left(s), can = (k) => Level.cost(s, k) <= rest, mins = (k) => ' (' + Level.cost(s, k) + ' min)', outBtn = '<button class="sp-act" disabled>Daar is het te laat voor</button>', left = 1;
+      const rest = Clock.left(s), can = (k) => Level.cost(s, k) <= rest, mins = (k) => ' (' + Level.cost(s, k) + ' min)', outBtn = '<button class="sp-act" disabled>Daar is het te laat voor</button>';
       if (sel.kind !== 'obj') {
         // v0.8.0 (nieuw A): until you speak to someone, you only see what anyone could see
         const x = sel.ref, core = sel.kind === 'npc', known = People.known(s, x.id), label = Tableau.label(sel, s, M);
@@ -440,26 +444,13 @@ const UI = {
       `<h4>Voorwerpen</h4><div class="sp-chips">${objs.map(chip).join('')}</div>`;
     return `<div class="tv"><div class="tv-stage"><div class="tv-canvas">${Tableau.svg(s, loc.id, part, fam, this.hot)}${pop}</div></div><aside class="tv-side">${side}</aside></div>`;
   },
-  // fallback conversation side-panel (if Interrogation is not loaded in views.js)
-  convPanel(s, fam) {
-    const v = s.visit, n = World.npc(s, v.conv), tone = Rels.toneOf(s, n.id), b = (label, data, cls) => `<button class="sp-chip ${cls || ''}" ${Object.keys(data).map((k) => `data-${k}="${U.esc(data[k])}"`).join(' ')}>${label}</button>`;
-    let h = `<div class="cv"><div class="row2"><div style="border:3px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 64 })}</div><div><b>${U.esc(n.name)}</b><br><span class="sp-note">${U.esc(n.role)}, doet ${TONE_WORD[tone]}</span></div></div>`;
-    const lines = s.log.filter((e) => e.i > (v.convAt || 0));
-    h += `<div class="cv-log">` + lines.slice(-10).map((e) => e.k === 'p' ? `<p class="say ${e.tone || ''}"><b>${U.esc(U.first(World.npc(s, e.npc)))}:</b> ${U.esc(e.text)}</p>` : `<p class="${e.k === 's' ? 'sys' : 'narr'}">${U.esc(e.text)}</p>`).join('') + '</div>';
-    h += `<h4>Aanpak</h4><div class="sp-chips seg">` + Object.keys(APPROACH).map((k) => b(APPROACH[k].label, { ui: 'approach', v: k }, this.approach === k ? 'on' : '')).join('') + '</div>';
-    const topics = Dialogue.topics(s, n), cons = Dialogue.confronts(s, n);
-    h += `<h4>Vraag naar</h4><div class="cv-opts">` + topics.map((t) => b(U.esc(t.label), { ui: 'topic', v: t.id }, t.id.indexOf('ev:') === 0 ? 'lead' : '')).join('') +
-      cons.map((c) => b('Confronteer: ' + U.esc(Evidence.get(s, c.counterEvidence).title), { ui: 'confront', v: c.id }, 'hot')).join('') +
-      (Dialogue.canTreat(s, n) ? b('Trakteer op een glas (' + TREAT_COST + ' ' + U.esc(s.meta.eraRules.currency || '') + ')', { ui: 'treat', v: n.id }) : '') +
-      (!topics.length && !cons.length ? '<p class="sp-note">Alles is gevraagd. Elk onderwerp kan één keer per gesprek.</p>' : '') + '</div>';
-    h += `<button class="sp-btn" data-ui="talkend">Gesprek beëindigen</button></div>`;
-    return h;
-  },
   startVisit(locId) {
     const s = this.s, loc = World.loc(s, locId); if (!loc || s.play.ended) return;
     if (s.visit) { if (s.visit.locId === locId) { this.tab = 'visit'; return this.render(); } return this.toast('Je bent nog in ' + World.here(s).name + '. Vertrek eerst.'); }
     if (s.clock.part >= DAY.parts) return this.toast('Het is nacht. Sluit de dag af om morgen verder te gaan.');
-    if (!World.openAt(loc, s.clock.part)) return this.toast(loc.name + ' is dicht in de ' + PARTS[s.clock.part] + '.');
+    const T = Travel.check(s, locId);
+    if (T.late) return this.toast('Je komt pas om ' + U.hm(T.at) + ' aan in ' + loc.name + '. Dat is te laat voor vandaag.');
+    if (!T.open) return this.toast(loc.name + ' is dicht in de ' + PARTS[T.part] + (T.part !== s.clock.part ? ', als je er om ' + U.hm(T.at) + ' aankomt' : '') + '.');
     this.sel = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.tab = 'visit';
     this.run((st) => Act.visit(st, locId));
   },
@@ -567,14 +558,27 @@ const UI = {
     const s = this.s, ids = Pins.inFolder(s, zone), fam = famOf(s);
     if (!ids.length) { this.close(); return this.render(); }
     const sub = (id) => { const k = id.split(':')[0], ref = id.slice(k.length + 1);
-      if (k === 'p') { const n = World.npc(s, ref); return n.role.replace(/ \(.*\)$/, ''); }
-      if (k === 'l') return World.loc(s, ref).description;
-      if (ref.indexOf('con_') === 0) return s.contradictions.find((c) => c.id === ref).claim;
-      const e = Evidence.get(s, ref); return e.text; };
+      if (k === 'p') {
+        if (!s.play.met[ref]) return 'Nog niet ontmoet · genoemd ' + Mentions.source(s, (s.play.heardOf || {})[ref]) + '.';
+        const n = World.npc(s, ref); return n ? n.role.replace(/ \(.*\)$/, '') : '';
+      }
+      if (k === 'l') {
+        if (!s.play.visited[ref]) return 'Nog niet bezocht.';
+        const l = World.loc(s, ref); return l ? l.description : '';
+      }
+      if (k === 'o') {
+        const l = s.world.locations.find((x) => x.objects.some((o) => o.id === ref));
+        return l ? 'Bij ' + l.name + '. Nog bekijken zodra je meer weet.' : 'Nog bekijken.';
+      }
+      if (ref.indexOf('con_') === 0) { const c = s.contradictions.find((x) => x.id === ref); return c ? c.claim : ''; }
+      const e = Evidence.get(s, ref); return e ? e.text : ''; };
     const items = ids.slice().sort((a, b) => Board.title(s, a).localeCompare(Board.title(s, b), 'nl'));
     let h = '<p class="sys">Wat hier ligt, telt gewoon mee in het zaakverslag. Je draadjes blijven bewaard.</p>' + items.map((id) => {
-      const k = id.split(':')[0], n = k === 'p' ? World.npc(s, id.slice(2)) : null;
-      return '<div class="arch-it">' + (n ? '<span class="jframe" style="background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, w: 40 }) + '</span>' : '') +
+      const k = id.split(':')[0], ref = id.slice(k.length + 1), n = k === 'p' ? World.npc(s, ref) : null;
+      const thumb = !n ? '' : s.play.met[ref]
+        ? '<span class="jframe" style="background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, w: 40 }) + '</span>'
+        : '<span class="jframe">' + Board.blank(40) + '</span>';
+      return '<div class="arch-it">' + thumb +
         '<div><b>' + U.esc(Board.title(s, id)) + '</b><small>' + U.esc(sub(id)) + '</small></div>' + this.btn('Terug op het bord', { x: 'unarch', v: id }) + '</div>'; }).join('');
     if (items.length > 1) h += '<div class="row">' + this.btn('Alles terug op het bord', { x: 'unarchall' }, 'hot') + '</div>';
     this.open(Pins.FOLDER[zone], h, (e) => {

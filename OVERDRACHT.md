@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.12.0)
+# Het Spoor, overdracht (stand v0.12.1)
 
-Dit document hoort bij de map `het-spoor-v0.12.0`. Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat. Upload het samen met alle zeven spelbestanden in een nieuwe chat.
+Dit document hoort bij `het-spoor` (`v0.12.1`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
@@ -128,6 +128,27 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.12.0 
   - Een voornaam telt alleen als niemand anders in de stad die voornaam heeft.
   - Een genoemde plek die je nog niet bezocht komt gestippeld in de plaatsenstrook. Een voorwerp met een "?" komt als blanco stuk "Nog bekijken" op het bord (niet op Moeilijk, daar bestaan die markeringen niet).
   - Blanco kaarten volgen na de actieve kaarten, dus bij overloop verdwijnen zij eerst in de overloopkaart. Je kunt ze archiveren en er draadjes naar trekken. Ontmoet of bezoek je ze, dan worden ze actief en blijven de draadjes. Een blanco stuk geeft zijn draadjes door aan het stuk dat je er vindt.
+
+### Fase A, v0.12.1: kritieke bugs, spoiler-lekken & donkere modus
+- **Archief & blanco kaarten (`UI.archiveBox`, `Evidence.give`, `Act._open`, `Act.talkStart`):**
+  - Crash op gearchiveerde blanco voorwerpen (`o:...`) verholpen.
+  - Spoiler-lekken verholpen: nog niet ontmoete personen in *Archief Personen* tonen nu het blanco silhouet zonder rol/kenmerk; nog niet bezochte plaatsen tonen geen beschrijving.
+  - Nieuw gevonden bewijs, een eerste ontmoeting of een eerste bezoek haalt een eerder gearchiveerde blanco kaart automatisch terug naar het bord (draadjes blijven bewaard).
+- **Zaakbord (`Board.linked`):** het selecteren van een plaats licht geen nog niet ontmoete blanco personen meer op.
+- **Tableau (`Tableau.model`):** bij grote avonddrukte (>11 aanwezigen op één plek) worden extra figuren netjes binnen `x = 78..882` op het 960 px canvas verdeeld.
+- **Reistijd (`UI.startVisit`):** gebruikt nu `Travel.check` (openingstijd bij aankomst) net als `Act.visit` en `UI.stnDetail`.
+- **Donkere modus, contrast & CSS (`style.css`, `views.js`, `ui.js`):**
+  - `MAP_INK` en `MapGen.ground` werken volledig via CSS-variabelen met een leesbaar donker kaartpalet.
+  - Onzichtbare `.tv-pop-x` sluitknop in donkere modus hersteld.
+  - Afgeknipt `[data-fam="klassiek"] .doc .dk`-label (door `overflow: hidden`) hersteld via inset-kopstrook binnen de padding-box.
+  - Donkere modus toegevoegd voor startscherm, koude opening, `.sp-feed` en bordkaarten; contrasten voor `--sp-mute`, `--mute`, `.ok`, `.bad`, `.iv-evhead` en `--sp-thread` naar WCAG AA gebracht; `.arch-it` gebruikt nu `--sp-line` en `--soft`.
+  - `UI.animateTranscript` respecteert nu `prefers-reduced-motion`.
+  - Dode code/CSS opgeruimd (`UI.convPanel`, `.cv*`, `.sp-att .dots`, `UI.mapCache`, streaming-chunk-commentaren).
+
+## Meetwaarden (stand v0.12.1)
+
+- 60 tests, alle groen in Node (56 bestaand + 4 nieuwe regressietests voor `Board.linked`, archief-terugkeer, tableau-overloop en donkere kaartvariabelen), plus UI-rookchecks voor `UI.archiveBox` en `UI.startVisit`.
+- Roadmap voor vervolgfasen (akkoord van eigenaar): **Fase A (klaar)** → **Fase B** (design-systeem, stijl, bovenbalk, tekstgrootte, Dagboek-tabs) → **Fase C** (a11y, deel-renders, staande weergave) → **Fase D** (responsief zaakbord, kleurdraadjes, verdachtenmatrix) → **Fase E** (klikbare namen, roostertips, hints, bevestigingen) → **Fase F** (inktlijn-portretten, scènes, kaart, game feel) → **Fase G** (Spoorboek, twists, balans) → **Fase H** (PWA, save-migraties, UI-teststraat).
 
 ## Meetwaarden (stand v0.12.0)
 
