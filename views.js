@@ -342,7 +342,7 @@ const Board = {
     let h = `<div class="bd${link ? ' linking' : hl ? ' focus' : ''}" style="height:${this.H}px">`;
     this.ZONES.forEach((z) => { h += `<div class="zn" style="left:${z[1]}px;top:${z[2]}px">${z[0]}</div>`; });
     this.folders(s).forEach((f) => { h += `<button class="zf" data-ui="archive" data-v="${f.zone}" style="left:${f.x}px;top:${f.y}px" aria-label="${U.esc(Pins.FOLDER[f.zone])}, ${f.n} ${f.n === 1 ? 'kaart' : 'kaarten'}"><i aria-hidden="true"></i>Archief · ${f.n}</button>`; });
-    L.cards.forEach((c) => { const html = this.card(s, c, fam), cls = (hl && hl.has(c.id) ? ' hl' : '') + (sel === c.id ? ' sel' : ''); h += cls ? html.replace('class="bc ', 'class="bc' + cls + ' ') : html; });
+    L.cards.forEach((c) => { const html = this.card(s, c, fam), cls = (hl && hl.has(c.id) ? ' hl' : '') + (sel === c.id ? ' sel' : ''), prs = c.kind !== 'more' ? ` aria-pressed="${sel === c.id ? 'true' : 'false'}"` : ''; h += (cls ? html.replace('class="bc ', 'class="bc' + cls + ' ') : html).replace(' role="button"', ' role="button"' + prs); });
     h += `<svg class="bt" viewBox="0 0 ${this.W} ${this.H}" style="height:${this.H}px" aria-hidden="true">`;
     if (hl && sel && !link) { const e = Evidence.get(s, sel.slice(2)); if (e) e.requires.forEach((r) => { const a = byId['d:' + r] || byId['s:' + r]; if (a) h += `<path class="req hl" d="${this.path(this.anchor(byId[sel], a), this.anchor(a, byId[sel]), 'req')}"/>`; }); }
     L.threads.forEach((t) => { const a = byId[t.a], b = byId[t.b]; const on = hl && hl.has(t.a) && hl.has(t.b); h += `<path class="${t.kind}${on ? ' hl' : ''}" d="${this.path(this.anchor(a, b), this.anchor(b, a), t.kind)}"/>`; });
@@ -351,7 +351,7 @@ const Board = {
   },
   detail(s, id, fam) {
     const k = id === 'case' ? 'case' : id.split(':')[0], ref = id.slice(k.length + 1);
-    let h = '<button class="sp-x" data-sp="unsel">Sluiten</button>';
+    let h = '<button type="button" class="sp-x" data-sp="unsel">Sluiten</button>';
     if (k === 'p' && !s.play.met[ref]) {
       const n = World.npc(s, ref), hh = (s.play.heardOf || {})[ref];
       h += `<div style="float:left;margin:0 12px 6px 0">${this.blank(80)}</div><h3>${U.esc(n.name)}</h3><p>Je kent ${U.esc(U.first(n))} alleen van naam. Genoemd ${U.esc(Mentions.source(s, hh))}.</p>`;
@@ -366,14 +366,14 @@ const Board = {
     if (k === 'l' && !s.play.visited[ref]) {
       const l = World.loc(s, ref), T = Travel.check(s, ref);
       h += `<h3>${U.esc(l.name)}</h3><p>Je hebt van deze plek gehoord, maar je bent er nog niet geweest.</p><p class="sp-note">Open van ${l.open[0]} tot ${l.open[1]} uur. Lopen kost ${T.walk} minuten.</p>`;
-      if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button class="sp-btn" data-sp="visit" data-v="${l.id}">Ga erheen (${T.walk} min, aankomst ${U.hm(T.at)})</button>`;
+      if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button type="button" class="sp-btn" data-sp="visit" data-v="${l.id}">Ga erheen (${T.walk} min, aankomst ${U.hm(T.at)})</button>`;
       return h + this.tools(s, id);
     }
     if (k === 'p') {
-      const n = World.npc(s, ref), r = s.relations[n.id], tone = Rels.toneOf(s, n.id), bar = (lab, v, c) => `<span>${lab}</span><i style="--v:${v}%;--c:${c}"></i>`;
-      h += `<div style="float:left;margin:0 12px 6px 0;border:3px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 96 })}</div>`;
+      const n = World.npc(s, ref), r = s.relations[n.id], tone = Rels.toneOf(s, n.id), bar = (lab, v, c) => `<span>${lab}</span><i role="progressbar" aria-label="${lab}" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="100" style="--v:${v}%;--c:${c}"></i><small class="rel-val">${v}</small>`;
+      h += `<div class="det-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[tone], w: 96 })}</div>`;
       h += `<h3>${U.esc(n.name)}</h3><p>${U.esc(n.role)}, ${n.age} jaar. Doet ${TONE_WORD[tone]} tegen je; houding: ${STANCE_LABEL[TONE_STANCE[tone]]}.</p><p><i>${U.esc(r.statusText)}</i></p>`;
-      h += `<h4 style="clear:both">Relatie</h4><div class="relbar">${bar('Vertrouwen', r.trust, '#4f7f3a')}${bar('Genegenheid', r.affection, '#c48a1c')}${bar('Wrok', r.resentment, '#b9442f')}${bar('Argwaan', r.suspicion, '#2f6f8f')}</div>`;
+      h += `<h4 style="clear:both">Relatie</h4><div class="relbar">${bar('Vertrouwen', r.trust, '#3c7031')}${bar('Genegenheid', r.affection, '#b8821d')}${bar('Wrok', r.resentment, '#b33a28')}${bar('Argwaan', r.suspicion, '#2b6785')}</div>`;
       h += `<p class="sp-note" style="margin-top:10px">${U.esc(Rnd.cap(n.personality))}; ${U.esc(n.voice)}.</p>`;
       if (n.kenmerk) h += `<p><b>Opvallend:</b> ${U.esc(KENMERK[n.kenmerk].desc)}.</p>`;
       const al = s.alibis && s.alibis[n.id], chk = s.play.alibiCheck && s.play.alibiCheck[n.id];
@@ -1005,7 +1005,7 @@ const Interrogation = {
       return `<b class="iv-delta ${good ? 'pos' : 'neg'}">${sign}</b>`;
     };
     const bar = (key, lab, val, col) =>
-      `<div class="iv-rrow"><span>${lab} ${dBadge(key)}</span><i style="--v:${val}%;--c:${col}"></i></div>`;
+      `<div class="iv-rrow"><span>${lab} ${dBadge(key)}</span><i role="progressbar" aria-label="${lab}" aria-valuenow="${val}" aria-valuemin="0" aria-valuemax="100" style="--v:${val}%;--c:${col}"></i><small class="rel-val">${val}</small></div>`;
 
     const left = `<aside class="iv-left" style="--tone:${TONE_COLOR[tone]};--phbg:${F.photo}">
       <div class="iv-frame" data-tone="${tone}" data-stance="${STANCE_LABEL[stance]}">
@@ -1016,10 +1016,10 @@ const Interrogation = {
         <h3>${U.esc(npc.name)}</h3>
         <p class="sp-note">${U.esc(npc.role)} · ${U.esc(pace.label)}</p>
         <div class="iv-rels">
-          ${bar('trust', 'Vertrouwen', r.trust, '#4f7f3a')}
-          ${bar('affection', 'Genegenheid', r.affection, '#c48a1c')}
-          ${bar('resentment', 'Wrok', r.resentment, '#b9442f')}
-          ${bar('suspicion', 'Argwaan', r.suspicion, '#2f6f8f')}
+          ${bar('trust', 'Vertrouwen', r.trust, '#3c7031')}
+          ${bar('affection', 'Genegenheid', r.affection, '#b8821d')}
+          ${bar('resentment', 'Wrok', r.resentment, '#b33a28')}
+          ${bar('suspicion', 'Argwaan', r.suspicion, '#2b6785')}
         </div>
       </div>
     </aside>`;
@@ -1045,7 +1045,7 @@ const Interrogation = {
     const tCards = topics.map((t) => {
       const isLead = t.id.indexOf('ev:') === 0;
       const kind = t.id === 'alibi' ? 'Alibi' : t.id === 'crime' ? 'De zaak' : t.id.indexOf('chk:') === 0 ? 'Controle' : t.id === 'xt' ? 'Teruggeven' : isLead ? 'Spoor' : 'Kennismaking';
-      return `<button class="iv-qcard${isLead ? ' lead' : ''}" data-ui="topic" data-v="${U.esc(t.id)}">
+      return `<button type="button" class="iv-qcard${isLead ? ' lead' : ''}" data-ui="topic" data-v="${U.esc(t.id)}">
         <small>${kind}</small><b>${U.esc(t.label)}</b>
       </button>`;
     }).join('');
@@ -1058,10 +1058,10 @@ const Interrogation = {
       evDeck = `<div class="iv-evtray">
         <div class="iv-evhead">
           <b>Speel een bewijsstuk van het zaakbord uit${claimObj ? ' tegen: ' + U.esc(claimObj.claim) : ''}</b>
-          ${showEv ? `<button class="sp-chip" data-ui="evtoggle">Sluit bewijsmap</button>` : ''}
+          ${showEv ? `<button type="button" class="sp-chip" data-ui="evtoggle">Sluit bewijsmap</button>` : ''}
         </div>
         <div class="iv-evcards">
-          ${boardEvs.map((e) => `<button class="iv-evcard" data-ui="playev" data-v="${U.esc(e.id)}">
+          ${boardEvs.map((e) => `<button type="button" class="iv-evcard" data-ui="playev" data-v="${U.esc(e.id)}">
             <span class="pin"></span><small>${U.esc(e.slot === 'motive' ? 'Motief' : e.slot === 'method' ? 'Werkwijze' : 'Bewijsstuk')}</small>
             <b>${U.esc(e.title)}</b>
           </button>`).join('') || '<p class="sp-note">Je hebt nog geen bruikbare bewijsstukken op het bord.</p>'}
@@ -1070,20 +1070,20 @@ const Interrogation = {
     }
 
     const right = `<section class="iv-right">
-      <div class="iv-paper" data-ui="skip-type" title="Tik om tekst direct te tonen">
-        <div class="iv-phead"><span>Verhoortranscript · ${U.esc(World.here(s).name)}</span><small class="iv-skip-hint">Tik op het papier om versneld te lezen</small></div>
+      <div class="iv-paper" data-ui="skip-type">
+        <div class="iv-phead"><span>Verhoortranscript · ${U.esc(World.here(s).name)}</span><button type="button" class="iv-skip-btn" data-ui="skip-type">Alles direct tonen</button></div>
         <div class="iv-log">${strips}</div>
       </div>
       <div class="iv-desk">
         <div class="iv-bar">
-          <div class="sp-chips seg">
-            <span class="sp-note" style="margin-right:4px">Toon:</span>
-            ${Object.keys(APPROACH).map((k) => `<button class="sp-chip${approach === k ? ' on' : ''}" data-ui="approach" data-v="${k}">${APPROACH[k].label}${Level.get(s).toneHint && Dialogue.best(npc) === k ? ' ★' : ''}</button>`).join('')}
+          <div class="sp-chips seg" role="group" aria-label="Toon van de vraag">
+            <span class="sp-note iv-tone-lbl">Toon:</span>
+            ${Object.keys(APPROACH).map((k) => `<button type="button" class="sp-chip${approach === k ? ' on' : ''}" aria-pressed="${approach === k}" data-ui="approach" data-v="${k}">${APPROACH[k].label}${Level.get(s).toneHint && Dialogue.best(npc) === k ? ' ★' : ''}</button>`).join('')}
           </div>
           <div class="iv-actions">
-            ${Dialogue.canTreat(s, npc) ? `<button class="sp-chip" data-ui="treat" data-v="${npc.id}">Trakteer (${TREAT_COST} ${U.esc(s.meta.eraRules.currency || '')})</button>` : ''}
-            ${hasHeardClaim && !autoTray && !showEv ? `<button class="sp-chip" data-ui="evtoggle">Bewijsstuk voorleggen…</button>` : ''}
-            <button class="sp-btn" data-ui="talkend">Verhoor afronden</button>
+            ${Dialogue.canTreat(s, npc) ? `<button type="button" class="sp-chip" data-ui="treat" data-v="${npc.id}">Trakteer (${TREAT_COST} ${U.esc(s.meta.eraRules.currency || '')})</button>` : ''}
+            ${hasHeardClaim && !autoTray && !showEv ? `<button type="button" class="sp-chip" data-ui="evtoggle">Bewijsstuk voorleggen…</button>` : ''}
+            <button type="button" class="sp-btn" data-ui="talkend">Verhoor afronden</button>
           </div>
         </div>
         ${evDeck}

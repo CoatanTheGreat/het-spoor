@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.12.1)
+# Het Spoor, overdracht (stand v0.13.0)
 
-Dit document hoort bij `het-spoor` (`v0.12.1`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
+Dit document hoort bij `het-spoor` (`v0.13.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
@@ -144,6 +144,30 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.12.0 
   - Donkere modus toegevoegd voor startscherm, koude opening, `.sp-feed` en bordkaarten; contrasten voor `--sp-mute`, `--mute`, `.ok`, `.bad`, `.iv-evhead` en `--sp-thread` naar WCAG AA gebracht; `.arch-it` gebruikt nu `--sp-line` en `--soft`.
   - `UI.animateTranscript` respecteert nu `prefers-reduced-motion`.
   - Dode code/CSS opgeruimd (`UI.convPanel`, `.cv*`, `.sp-att .dots`, `UI.mapCache`, streaming-chunk-commentaren).
+
+### Fase B, v0.13.0: één design-systeem, moderne "papier & inkt"-stijl, bovenbalk, Dagboek & kern-toegankelijkheid
+- **Eén design-systeem (`style.css`):**
+  - Dubbele v0.5/v0.6-variabelen samengevoegd tot één centrale tokenlaag (licht, donker, 4 tijdvakken en dagdeel-accenten op `#app[data-part="0..3"]`), volledig op WCAG AA (`>= 5,3:1` voor alle tekstparen).
+  - Verfijnde *papier & inkt*-afwerking: fijnere randen (`1–1,5 px`), zachte gelaagde schaduwen, rustigere kurk-/vilttextuur zonder stippenraster, strakke typografie (weg van systeem-`cursive` en Windows-only `Bahnschrift`) en rustige sprekerkaarten in het verhoortranscript.
+- **Eén rustige bovenbalk (`ui.js`, `index.html`):**
+  - `.sp-top` en `.sp-bar` samengevoegd tot één semantische `<header class="sp-head">` met merk + zaaksubtitel, `<nav class="sp-tabs">`, klok + dagactie, en *Dagboek / Zaakverslag / Systeem / Geluid*.
+- **Weergave & leesgemak voor 12–70 jaar (`UI.system`, `prefs`):**
+  - Instelbare **Tekstgrootte** (`Normaal` 16 px / `Groot` 18 px / `Extra groot` 20 px via `html[data-size]`) en **Rustig leesfont** (`html[data-font="plain"]`, schakelt cursieve/monospace kaartteksten uit).
+- **Dagboek met tabbladen & zoekfunctie (`UI.journal`):**
+  - Vier tabbladen (*Overzicht*, *Sporen*, *Mensen*, *Logboek*) met live zoekveld op naam, plaats of woord.
+- **Naar voren gehaald uit Fase C (toegankelijkheid & staand scherm):**
+  - Semantische landmarks (`<header>`, `<nav>`, `<main id="main">`, skiplink), volledige modal-a11y (`role="dialog"`, `aria-modal`, Tab-focus-trap, focusterugkeer bij sluiten), `#toast` met `role="status"` / `aria-live="polite"`.
+  - Relatiebalken en bezoekklokbalk zijn echte `role="progressbar"`-elementen met zichtbare getallen; toetsenbord-toegankelijke bestandsinputs (`.sr-only`), `radiogroup`-pijltjestoetsen zonder focusdiefstal, echte *"Alles direct tonen"* / *"Toon hele tekst"*-knoppen en duidelijke focusringen op kaart/tableau.
+  - Harde `#rotate`-blokkade verwijderd (WCAG 1.3.4): zijladen, tableau en verhoorscherm schalen nu netjes mee op staande iPad en smalle schermen.
+
+## Meetwaarden (stand v0.13.0)
+
+- 60 tests, alle groen in Node + UI-rookchecks (prefs-dataset, enkele header + `<main>`, 4 Dagboek-tabs, Systeem-weergave, `.sr-only` bestandsinputs, modal-sluiten).
+- Roadmap-status:
+  - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
+  - **Fase B (`v0.13.0`) + deel Fase C (a11y/modals/landmarks/staand scherm)**: klaar
+  - **Volgende stap — Fase C (rest) + Fase D (`v0.14.0`)**: gerichte DOM-deelrenders (geen volledige `#app.innerHTML`-herbouw, focus- en scrollbehoud) + nieuw responsief Zaakbord (echte leesbare grootte >= 44 px, dynamische draadjes achter kaarten met kleur/label, eigen status-tags/notities, "Nieuw"-badges en Verdachtenmatrix)
+  - **Daarna**: Fase E (klikbare namen, roostertips, 3-traps hints, veilige bevestigingen) → Fase F (inktlijn-portretten, diepere scènes, rustigere kaart, game feel & audio) → Fase G (interactief Spoorboek, extra twists, relaties, balans) → Fase H (PWA, save-migraties, Playwright/a11y-teststraat).
 
 ## Meetwaarden (stand v0.12.1)
 

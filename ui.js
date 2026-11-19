@@ -75,8 +75,8 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', typeTimer: null, feed: [], theme: 'auto', oldRaw: null, taps: 0, tt: null, bound: false,
-  btn: (label, data, cls) => '<button class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', lastFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
 
   async init() {
     window.addEventListener('error', (e) => this.toast('Fout: ' + (e.message || 'onbekend') + '. Meld dit met een schermafbeelding.', 8000));
@@ -87,15 +87,18 @@ const UI = {
     Content.init();
     const pack = await Store.get('contentPack');
     if (pack) { const r = Content.importPack(pack); if (!r.ok) this.toast('Contentpakket niet geladen: ' + r.rep.errors[0]); }
-    // In UI.init(): lees ook 'muted' uit prefs:
-    let theme = 'auto', parsed = {};
+    let theme = 'auto', size = 'normal', font = 'classic', parsed = {};
     try {
       const prefs = await Store.get('prefs'); parsed = prefs ? JSON.parse(prefs) : {};
       theme = parsed.theme || 'auto';
+      size = ['normal', 'large', 'xlarge'].indexOf(parsed.size) >= 0 ? parsed.size : 'normal';
+      font = ['classic', 'plain'].indexOf(parsed.font) >= 0 ? parsed.font : 'classic';
       SFX.muted = !!parsed.muted;
       if (LEVELS[parsed.level]) this.level = parsed.level;
-    } catch (e) { theme = 'auto'; parsed = {}; }
+    } catch (e) { theme = 'auto'; size = 'normal'; font = 'classic'; parsed = {}; }
     this.setTheme(theme, true);
+    this.setSize(size, true);
+    this.setFont(font, true);
     this.oldRaw = await Store.get('oldAuto');
     const saved = await Store.get('auto');
     // v0.10.0 (voorstel 10): the intro state lives in the prefs; someone who already played skips the guided visit
@@ -204,8 +207,10 @@ const UI = {
     if (s.play.ended && !s.play.endingShown) { s.play.endingShown = true; Store.put('auto', Save.pack(s)); this.ending(); }
   },
   map() { return Travel.map(this.s); },
-  savePrefs() { Store.put('prefs', JSON.stringify({ theme: this.theme, muted: SFX.muted, level: this.level, intro: this.intro })); },
+  savePrefs() { Store.put('prefs', JSON.stringify({ theme: this.theme, size: this.size, font: this.font, muted: SFX.muted, level: this.level, intro: this.intro })); },
   setTheme(t, quiet) { this.theme = t; document.documentElement.dataset.theme = t; if (!quiet) this.savePrefs(); },
+  setSize(sz, quiet) { this.size = ['normal', 'large', 'xlarge'].indexOf(sz) >= 0 ? sz : 'normal'; document.documentElement.dataset.size = this.size; if (!quiet) this.savePrefs(); },
+  setFont(fn, quiet) { this.font = ['classic', 'plain'].indexOf(fn) >= 0 ? fn : 'classic'; document.documentElement.dataset.font = this.font; if (!quiet) this.savePrefs(); },
   toggleMute() { SFX.muted = !SFX.muted; this.savePrefs(); if (!SFX.muted) SFX.pin(); this.render(true); },
   // v0.7.0: switching the level of the running game only changes the help, never the case itself
   setLevel(lv) { if (!LEVELS[lv]) return; this.level = lv; this.savePrefs(); if (this.s) { this.s.settings = this.s.settings || {}; this.s.settings.level = lv; Store.put('auto', Save.pack(this.s)); this.render(); } },
@@ -219,24 +224,31 @@ const UI = {
   },
   reduced: () => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
   showStart() { clearTimeout(this.typeTimer); clearTimeout(this.introT); this.close(); this.screen = 'start'; $('#app').hidden = false; this.renderScreen(); },
-  renderScreen() {
+  renderScreen(focusRadio) {
     const root = $('#app'); clearTimeout(this.introT);
+    delete root.dataset.part;
     root.innerHTML = this.screen === 'intro' && this.s ? this.introHtml() : this.startHtml();
     if (this.screen === 'intro') this.revealIntro();
-    const first = root.querySelector('.st-go, .st-resume'); if (first) first.focus({ preventScroll: true });
+    if (focusRadio) {
+      const rEl = root.querySelector(`[data-ui="st-level"][data-v="${focusRadio}"]`);
+      if (rEl) rEl.focus({ preventScroll: true });
+    } else {
+      const first = root.querySelector('.st-go, .st-resume');
+      if (first) first.focus({ preventScroll: true });
+    }
   },
   startHtml() {
     const s = this.s, live = s && !s.play.ended;
-    const cards = Object.keys(LEVELS).map((k) => `<button class="st-lv${this.level === k ? ' on' : ''}" role="radio" aria-checked="${this.level === k}" data-ui="st-level" data-v="${k}"><span class="pin"></span>` +
-      `<b>${LEVELS[k].label}</b><span>${U.esc(this.LV_START[k])}</span><small>Onderzoeken ${Math.round(15 * LEVELS[k].speed / 5) * 5} min, verhoren ${Math.round(30 * LEVELS[k].speed / 5) * 5} min</small></button>`).join('');
-    return `<div class="start"><div class="st-folder">` +
-      (live ? `<button class="st-resume" data-ui="st-resume"><b>Verder met ${U.esc(s.meta.title)}</b><small>Dag ${s.clock.day}, ${PARTS[Math.min(s.clock.part, 2)]}. ${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}.</small></button>` : '') +
+    const cards = Object.keys(LEVELS).map((k) => `<button type="button" class="st-lv${this.level === k ? ' on' : ''}" role="radio" aria-checked="${this.level === k}" tabindex="${this.level === k ? '0' : '-1'}" data-ui="st-level" data-v="${k}"><span class="pin" aria-hidden="true"></span>` +
+      `<b>${LEVELS[k].label}</b><span>${U.esc(this.LV_START[k])}</span><small>Onderzoeken ${Math.round(15 * LEVELS[k].speed / 5) * 5} min · verhoren ${Math.round(30 * LEVELS[k].speed / 5) * 5} min</small></button>`).join('');
+    return `<main id="main" class="start"><div class="st-folder">` +
+      (live ? `<button type="button" class="st-resume" data-ui="st-resume"><b>Verder met ${U.esc(s.meta.title)}</b><small>Dag ${s.clock.day}, ${PARTS[Math.min(s.clock.part, 2)]} · ${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}</small></button>` : '') +
       `<h1 class="st-title">Het Spoor</h1><p class="st-lead">Een stad, een voorval en vier dagen om te bewijzen wie het deed. Elke zaak is nieuw.</p>` +
       `<div class="st-lvs" role="radiogroup" aria-label="Niveau">${cards}</div>` +
-      `<div class="st-foot"><p class="st-note">Het niveau wissel je later via Systeem.</p><button class="st-go" data-ui="st-begin">${live ? 'Begin een nieuwe zaak' : 'Begin de zaak'}</button></div>` +
-      `<small class="st-ver">${APP.version}</small></div></div>`;
+      `<div class="st-foot"><p class="st-note">Het niveau en de weergave wissel je altijd via Systeem.</p><button type="button" class="st-go" data-ui="st-begin">${live ? 'Begin een nieuwe zaak' : 'Begin de zaak'}</button></div>` +
+      `<small class="st-ver">${APP.version}</small></div></main>`;
   },
-  // three short paragraphs from the case itself: who you are, what happened, where you stay
+  // short paragraphs from the case itself: who you are, the town, what happened, where you stay
   introText(s) {
     const n = s.log.filter((e) => e.k === 'n').map((e) => e.text).slice(1, 5);
     if (n.length) n[n.length - 1] += ' Het is de ochtend van dag 1.';
@@ -245,16 +257,16 @@ const UI = {
   introHtml() {
     const s = this.s, start = World.loc(s, s.startLoc), canGo = start && World.openAt(start, s.clock.part) && !s.visit;
     const paras = this.introText(s).map((x, i) => `<p class="co-line${i < (this.introN || 1) ? '' : ' co-hide'}">${U.esc(x)}</p>`).join('');
-    return `<div class="start"><div class="st-folder co"><h1 class="co-title">${U.esc(s.meta.title)}</h1><p class="co-sub">${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}. Niveau: ${U.esc(Level.get(s).label)}.</p>` +
-      `<div class="co-text" data-ui="st-reveal" title="Tik om alles te tonen">${paras}</div><div class="co-acts">` +
-      (canGo ? `<button class="st-go" data-ui="st-go">${s.pos === start.id ? 'Rondkijken in ' : 'Ga naar '}${U.esc(start.name)}</button>` : '') +
-      `<button class="st-sec${canGo ? '' : ' st-go'}" data-ui="st-board">${canGo ? 'Eerst naar het zaakbord' : 'Naar het zaakbord'}</button></div></div></div>`;
+    return `<main id="main" class="start"><div class="st-folder co"><div class="co-top"><div><h1 class="co-title">${U.esc(s.meta.title)}</h1><p class="co-sub">${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)} · Niveau: ${U.esc(Level.get(s).label)}</p></div><button type="button" class="co-skip-btn" data-ui="st-reveal">Toon hele tekst</button></div>` +
+      `<div class="co-text" data-ui="st-reveal">${paras}</div><div class="co-acts">` +
+      (canGo ? `<button type="button" class="st-go" data-ui="st-go">${s.pos === start.id ? 'Rondkijken in ' : 'Ga naar '}${U.esc(start.name)}</button>` : '') +
+      `<button type="button" class="st-sec${canGo ? '' : ' st-go'}" data-ui="st-board">${canGo ? 'Eerst naar het zaakbord' : 'Naar het zaakbord'}</button></div></div></main>`;
   },
   revealIntro() {
     const lines = Array.from(document.querySelectorAll('#app .co-line'));
     if (this.reduced()) { lines.forEach((p) => p.classList.remove('co-hide')); this.introN = lines.length; return; }
-    const step = () => { const next = lines.find((p) => p.classList.contains('co-hide')); if (!next) return; next.classList.remove('co-hide'); SFX.type(famOf(this.s)); this.introN = lines.indexOf(next) + 1; this.introT = setTimeout(step, 1500); };
-    this.introT = setTimeout(step, 1400);
+    const step = () => { const next = lines.find((p) => p.classList.contains('co-hide')); if (!next) return; next.classList.remove('co-hide'); SFX.type(famOf(this.s)); this.introN = lines.indexOf(next) + 1; this.introT = setTimeout(step, 1200); };
+    this.introT = setTimeout(step, 1050);
   },
   beginCase() {
     const s = Game.create('spoor-' + Date.now().toString(36), this.level);
@@ -264,7 +276,7 @@ const UI = {
   screenAct(el) {
     const d = el.dataset, u = d.ui;
     switch (u) {
-      case 'st-level': if (!LEVELS[d.v]) return true; SFX.pin(); this.level = d.v; this.savePrefs(); this.renderScreen(); return true;
+      case 'st-level': if (!LEVELS[d.v]) return true; SFX.pin(); this.level = d.v; this.savePrefs(); this.renderScreen(d.v); return true;
       case 'st-begin': SFX.paper(); this.beginCase(); return true;
       case 'st-resume': SFX.paper(); this.screen = null; this.render(); return true;
       case 'st-reveal': clearTimeout(this.introT); document.querySelectorAll('#app .co-line').forEach((p) => p.classList.remove('co-hide')); this.introN = 9; return true;
@@ -278,10 +290,10 @@ const UI = {
   coachPick() { return this.s && !this.screen && this.intro ? Coach.pick(this.s, this.intro, { tab: this.tab }) : null; },
   coachHtml(c) {
     return `<div class="coach" role="dialog" aria-live="polite" aria-label="${U.esc(c.title)}" data-coach="${c.id}">` + (c.guided ? `<small>Stap ${c.n} van 3</small>` : '') +
-      `<b>${U.esc(c.title)}</b><p>${U.esc(c.text)}</p><div class="coach-acts"><button class="coach-go" data-ui="coach-next" data-v="${c.id}">${c.btn}</button>` +
-      (c.guided ? `<button class="coach-skip" data-ui="coach-skip" data-v="${c.id}">Uitleg overslaan</button>` : '') + '</div></div>';
+      `<b>${U.esc(c.title)}</b><p>${U.esc(c.text)}</p><div class="coach-acts"><button type="button" class="coach-go" data-ui="coach-next" data-v="${c.id}">${c.btn}</button>` +
+      (c.guided ? `<button type="button" class="coach-skip" data-ui="coach-skip" data-v="${c.id}">Uitleg overslaan</button>` : '') + '</div></div>';
   },
-  // the bubble sits next to the element it explains; without one it takes the top right corner below the bars
+  // the bubble sits next to the element it explains; without one it takes the top right corner below the header
   placeCoach(c) {
     const root = $('#app'), el = root.querySelector('.coach'); if (!el) return;
     const tgt = c.sel.map((q) => root.querySelector(q)).find(Boolean), W = window.innerWidth, H = window.innerHeight, bw = el.offsetWidth, bh = el.offsetHeight;
@@ -290,11 +302,11 @@ const UI = {
       tgt.classList.add('coach-on'); const r = tgt.getBoundingClientRect();
       top = r.bottom + 12; if (top + bh > H - 12) top = r.top - bh - 12; if (top < 12) top = Math.max(12, Math.min(H - bh - 12, r.top + 12));
       left = r.left + r.width / 2 - bw / 2;
-    } else { const bar = root.querySelector('.sp-bar'); top = (bar ? bar.getBoundingClientRect().bottom : 100) + 12; left = W - bw - 24; }
+    } else { const bar = root.querySelector('.sp-head, .sp-bar'); top = (bar ? bar.getBoundingClientRect().bottom : 72) + 12; left = W - bw - 24; }
     el.style.top = Math.round(top) + 'px'; el.style.left = Math.round(Math.max(12, Math.min(W - bw - 12, left))) + 'px'; el.style.visibility = 'visible';
   },
 
-  /* ----- main view ----- */
+  /* ----- main view (v0.13.0: single calm header + semantic main landmark) ----- */
   render(keepFocus) {
     if (this.screen) return this.renderScreen();
     const s = this.s, root = $('#app'); if (!s) return;
@@ -302,28 +314,38 @@ const UI = {
     const fam = famOf(s), part = s.clock.part, v = s.visit, ended = !!s.play.ended, here = World.here(s);
     const ae = document.activeElement, fk = keepFocus && ae && (ae.dataset.card || ae.dataset.stn || ae.dataset.hs);
     const tabs = [['board', 'Zaakbord'], ['map', 'Kaart']].concat(v ? [['visit', 'Bezoek: ' + here.name]] : []);
-    let h = `<div class="sp-top"><h1 class="sp-title" data-ui="title">Het Spoor<small>${APP.version}</small></h1><nav class="sp-tabs">` +
-      tabs.map((t) => `<button data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}</button>`).join('') +
-      `</nav><div class="sp-tools"><button data-ui="journal">Dagboek</button><button data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}>Zaakverslag</button><button data-ui="system">Systeem</button></div></div>`;
     const late = s.clock.day > DAY.soft;
-    h += `<div class="sp-bar"><span class="sp-case">${U.esc(s.meta.title)}, ${U.esc(s.meta.eraLabel)}, ${U.esc(s.world.city.name)}</span>` +
-      `<span class="sp-clock${part >= DAY.parts ? ' night' : ''}">Dag ${s.clock.day} · <b>${U.hm(Clock.norm(s))}</b> · ${PARTS[part]}</span>` +
-      `<button class="sp-budget${late ? ' late' : ''}" data-ui="budgethelp" aria-label="Uitleg over de tijd">${late ? 'Het spoor koelt af' : 'Dag ' + s.clock.day + ' van ' + DAY.soft} <span class="sp-help" aria-hidden="true">?</span></button>`;
+    root.dataset.part = String(Math.min(part, 3));
+    let actHtml = '';
     if (!ended) {
-      if (v) h += `<button class="sp-btn go" data-ui="leave">Vertrek uit ${U.esc(here.name)}</button>`;
+      if (v) actHtml = `<button type="button" class="sp-hbtn go" data-ui="leave">Vertrek uit ${U.esc(here.name)}</button>`;
       else {
-        if (part < DAY.parts) h += `<button class="sp-btn" data-ui="wait">Wacht tot ${part < 2 ? 'de ' + PARTS[part + 1] + ' (' + U.hm(Clock.partEnd(part)) + ')' : 'tien uur'}</button>`;
-        if (part >= 2) h += `<button class="sp-btn${part >= DAY.parts ? ' go' : ''}" data-ui="endday">Sluit de dag af</button>`;
+        if (part < DAY.parts) actHtml += `<button type="button" class="sp-hbtn" data-ui="wait">Wacht tot ${part < 2 ? PARTS[part + 1] + ' (' + U.hm(Clock.partEnd(part)) + ')' : '22:00'}</button>`;
+        if (part >= 2) actHtml += `<button type="button" class="sp-hbtn${part >= DAY.parts ? ' go' : ''}" data-ui="endday">Sluit dag af</button>`;
       }
     }
-    h += `<button class="sp-btn sp-mute" data-ui="mute" title="Geluid aan of uit">${SFX.muted ? 'Geluid: uit' : 'Geluid: aan'}</button>` +
-      `<label class="sp-theme"><span class="sp-theme-l">Thema</span> <select data-ui="theme" aria-label="Thema">${[['auto', 'systeem'], ['light', 'licht'], ['dark', 'donker']].map((x) => `<option value="${x[0]}"${x[0] === this.theme ? ' selected' : ''}>${x[1]}</option>`).join('')}</select></label></div>`;
-    h += `<div class="sp-main" data-fam="${fam}">${this.view(s, fam)}</div>`;
+    const clockAria = `Dag ${s.clock.day} van ${DAY.soft}, ${U.hm(Clock.norm(s))}, ${PARTS[part]}${late ? '. Het spoor koelt af' : ''}. Tik voor uitleg over de tijd.`;
+    let h = `<header class="sp-head">` +
+      `<div class="sp-brand"><h1 class="sp-title" data-ui="title">Het Spoor</h1><span class="sp-case" title="${U.esc(s.meta.title + ' — ' + s.meta.eraLabel + ', ' + s.world.city.name)}">${U.esc(s.meta.title)} · ${U.esc(s.world.city.name)}</span></div>` +
+      `<nav class="sp-tabs" aria-label="Hoofdnavigatie">` +
+      tabs.map((t) => `<button type="button" data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}</button>`).join('') +
+      `</nav>` +
+      `<div class="sp-status">` +
+        `<button type="button" class="sp-clock${part >= DAY.parts ? ' night' : ''}${late ? ' late' : ''}" data-ui="budgethelp" aria-label="${U.esc(clockAria)}">Dag ${s.clock.day} · <b>${U.hm(Clock.norm(s))}</b> · ${PARTS[part]} <span class="sp-help" aria-hidden="true">?</span></button>` +
+        actHtml +
+      `</div>` +
+      `<div class="sp-tools">` +
+        `<button type="button" data-ui="journal">Dagboek</button>` +
+        `<button type="button" data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}>Zaakverslag</button>` +
+        `<button type="button" data-ui="system">Systeem</button>` +
+        `<button type="button" class="sp-icon-btn" data-ui="mute" aria-pressed="${!SFX.muted}" aria-label="${SFX.muted ? 'Geluid aanzetten' : 'Geluid uitzetten'}" title="${SFX.muted ? 'Geluid staat uit' : 'Geluid staat aan'}">${SFX.muted ? '🔇' : '🔊'}</button>` +
+      `</div></header>`;
+    h += `<main id="main" class="sp-main" data-fam="${fam}">${this.view(s, fam)}</main>`;
     const coach = this.coachPick(); if (coach) h += this.coachHtml(coach);
     root.innerHTML = h;
     if (this.tab === 'board') this.fit();
     if (coach) this.placeCoach(coach);
-    const log = root.querySelector('.iv-log, .cv-log'); if (log) log.scrollTop = log.scrollHeight;
+    const log = root.querySelector('.iv-log'); if (log) log.scrollTop = log.scrollHeight;
     if (fk) { const el = root.querySelector(`[data-card="${fk}"],[data-stn="${fk}"],[data-hs="${fk}"]`); if (el) el.focus({ preventScroll: true }); }
   },
   // v0.6.5 (voorstel 11): a tap on the map selects a place first; this drawer replaces the hover tooltips and
@@ -430,7 +452,7 @@ const UI = {
     // v0.12.0: the clock of this part of the day; at its end people move on
     const now = Clock.norm(s), p0 = PART_START[part], p1 = Clock.partEnd(part), pct = Math.round(100 * (now - p0) / (p1 - p0));
     let side = `<h3>${U.esc(loc.name)}</h3><p class="sp-note">${U.esc(loc.description)}</p>` +
-      `<div class="sp-att sp-time" aria-label="Het is ${U.hm(now)}; de ${PARTS[part]} duurt tot ${U.hm(p1)}"><span>${U.hm(now)}</span><span class="tbar"><i style="width:${pct}%"></i></span><b>tot ${U.hm(p1)}</b></div>` +
+      `<div class="sp-att sp-time"><span>${U.hm(now)}</span><span class="tbar" role="progressbar" aria-label="Voortgang ${PARTS[part]} tot ${U.hm(p1)}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span><b>tot ${U.hm(p1)}</b></div>` +
       `<p class="sp-note">Aanspreken en onderzoeken kost ${Level.cost(s, 'examine')} minuten, verhoren ${Level.cost(s, 'talk')}. Binnen een gesprek zijn alle vragen gratis. Om ${U.hm(p1)} ${part < 2 ? 'gaan de mensen naar hun volgende plek' : 'is de dag voorbij'}.</p>`;
     const intro = loc.name + '. ' + loc.description, feedAll = this.feed;
     this.feed = feedAll.filter((m) => m.text !== intro);   // the description already stands above (v0.6.5)
@@ -537,7 +559,23 @@ const UI = {
     });
     root.addEventListener('change', (e) => { if (e.target.dataset.ui === 'theme') { this.setTheme(e.target.value); this.render(); } });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { if (!$('#modal').hidden) return this.close(); if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); } return; }
+      const modal = $('#modal');
+      if (modal && !modal.hidden && e.key === 'Tab') {
+        const focusables = Array.from(modal.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null || el.classList.contains('sr-only'));
+        if (focusables.length) {
+          const first = focusables[0], last = focusables[focusables.length - 1];
+          if (e.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) { e.preventDefault(); last.focus(); return; }
+          if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return; }
+        }
+      }
+      if (e.key === 'Escape') { if (modal && !modal.hidden) return this.close(); if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); } return; }
+      const radio = e.target.closest && e.target.closest('#app [role="radio"][data-ui="st-level"]');
+      if (radio && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) >= 0) {
+        e.preventDefault();
+        const keys = Object.keys(LEVELS), idx = keys.indexOf(radio.dataset.v);
+        const next = keys[(idx + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : keys.length - 1)) % keys.length];
+        SFX.pin(); this.level = next; this.savePrefs(); this.renderScreen(next); return;
+      }
       if (e.key !== 'Enter' && e.key !== ' ') return;
       const t = e.target.closest && e.target.closest('#app [data-card],#app [data-stn],#app [data-hs]'); if (!t || t.tagName === 'BUTTON') return;
       e.preventDefault(); this.act(t);
@@ -551,8 +589,27 @@ const UI = {
   },
 
   /* ----- modals ----- */
-  open(title, html, onClick) { $('#mTitle').textContent = title; $('#mBody').innerHTML = html; $('#modal').hidden = false; $('#mBody').onclick = onClick || null; $('#mBody').scrollTop = 0; },
-  close() { $('#modal').hidden = true; },
+  open(title, html, onClick, opt) {
+    const modal = $('#modal'), wasHidden = modal.hidden;
+    if (wasHidden) this.lastFocus = document.activeElement;
+    $('#mTitle').textContent = title;
+    $('#mBody').innerHTML = html;
+    modal.hidden = false;
+    $('#mBody').onclick = onClick || null;
+    if (!(opt && opt.keepScroll)) $('#mBody').scrollTop = 0;
+    if (!(opt && opt.keepFocus)) {
+      const tgt = (opt && opt.focusSel && $('#mBody').querySelector(opt.focusSel)) || $('#mClose');
+      if (tgt && tgt.focus) tgt.focus({ preventScroll: true });
+    }
+  },
+  close() {
+    const modal = $('#modal');
+    if (modal.hidden) return;
+    modal.hidden = true;
+    const prev = this.lastFocus;
+    this.lastFocus = null;
+    if (prev && prev.focus && (prev.isConnected === undefined || prev.isConnected)) prev.focus({ preventScroll: true });
+  },
   // v0.11.0: one archive folder per zone of the board; take a card back, or all of them
   archiveBox(zone) {
     const s = this.s, ids = Pins.inFolder(s, zone), fam = famOf(s);
@@ -589,24 +646,84 @@ const UI = {
       SFX.pin(); Store.put('auto', Save.pack(s)); this.render(); this.archiveBox(zone);
     });
   },
-  journal() {
+  journal(opt) {
     const s = this.s, p = s.play, fam = famOf(s);
-    let h = '<h3>De zaak</h3><p class="narr">' + U.esc(s.crime.summary) + ' ' + U.esc(s.crime.personalHook) + '</p>';
-    h += '<h3>Sporen</h3>' + (Evidence.found(s).map((e) => '<div class="ev ' + (p.debunked[e.id] ? 'debunked' : '') + '"><b>' + U.esc(e.title) + '</b>' + (p.debunked[e.id] ? ' <i>(weerlegd)</i>' : '') + '<p>' + U.esc(e.text) + '</p></div>').join('') || '<p class="sys">Nog niets.</p>');
-    const claims = s.contradictions.filter((c) => p.heard[c.id]);
-    if (claims.length) h += '<h3>Verklaringen</h3>' + claims.map((c) => '<p><b>' + U.esc(World.npc(s, c.npcId).name) + ':</b> ' + U.esc(c.claim) + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '</p>').join('');
+    const foundEv = Evidence.found(s), claims = s.contradictions.filter((c) => p.heard[c.id]);
     const met = s.cast.filter((n) => p.met[n.id]).slice().sort(byName);
-    h += '<h3>Mensen</h3>' + (met.map((n) => { const t = Rels.toneOf(s, n.id);
-      return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b>' + U.esc(n.name) + '</b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span></div></div>'; }).join('') || '<p class="sys">Je hebt nog niemand gesproken.</p>');
     const figs = s.crowd.filter((c) => p.metCrowd && p.metCrowd[c.id]).slice().sort(byName);
-    if (figs.length) h += '<h3>Bijfiguren</h3><p class="sys">' + figs.map((c) => U.esc(c.name + ', ' + c.role)).join(' · ') + '</p>';
-    h += '<h3>Gesprekken en notities</h3>' + s.log.slice(-60).map((e) =>
-      e.k === 'p' ? '<p><b>' + U.esc(World.npc(s, e.npc).name) + ':</b> ' + U.esc(e.text) + '</p>' :
-      e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan ' + U.esc(U.first(World.npc(s, e.npc))) + '):</b> <i>' + U.esc(e.text) + '</i></p>' :
-      e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + U.esc(e.text) + '</p>' :
-      '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + U.esc(e.text) + '</p>'
-    ).join('');
-    this.open('Dagboek', h);
+    const tab = this.jTab || 'overzicht';
+    const tabs = [
+      ['overzicht', 'Overzicht'],
+      ['sporen', 'Sporen (' + foundEv.length + ')'],
+      ['mensen', 'Mensen (' + met.length + ')'],
+      ['log', 'Logboek']
+    ];
+    let h = '<div class="j-tabs" role="tablist" aria-label="Dagboek-onderdelen">' +
+      tabs.map((t) => '<button type="button" role="tab" aria-selected="' + (tab === t[0]) + '" class="j-tab' + (tab === t[0] ? ' on' : '') + '" data-jtab="' + t[0] + '">' + U.esc(t[1]) + '</button>').join('') +
+      '</div><div class="j-panel" role="tabpanel">';
+
+    if (tab === 'overzicht') {
+      h += '<h3>De zaak</h3><p class="narr">' + U.esc(s.crime.summary) + ' ' + U.esc(s.crime.personalHook) + '</p>';
+      h += '<div class="j-stats">' +
+        '<div class="j-stat"><b>' + foundEv.length + '</b><span>Sporen</span></div>' +
+        '<div class="j-stat"><b>' + claims.length + '</b><span>Verklaringen</span></div>' +
+        '<div class="j-stat"><b>' + met.length + '</b><span>Mensen gesproken</span></div>' +
+        '<div class="j-stat"><b>Dag ' + s.clock.day + '</b><span>' + U.hm(Clock.norm(s)) + ' · ' + PARTS[s.clock.part] + '</span></div>' +
+        '</div>';
+      if (s.meta.settingSummary) h += '<h3>De stad</h3><p class="narr">' + U.esc(s.meta.settingSummary) + '</p>';
+      if (claims.length) {
+        h += '<h3>Open verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b>' + U.esc(World.npc(s, c.npcId).name) + '</b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + U.esc(c.claim) + '</p></div>').join('');
+      }
+    } else if (tab === 'sporen') {
+      h += '<h3>Gevonden sporen</h3>' + (foundEv.map((e) => '<div class="ev ' + (p.debunked[e.id] ? 'debunked' : '') + '"><b>' + U.esc(e.title) + '</b>' + (p.debunked[e.id] ? ' <i>(weerlegd)</i>' : '') + '<p>' + U.esc(e.text) + '</p></div>').join('') || '<p class="sys">Je hebt nog geen sporen gevonden.</p>');
+      if (claims.length) h += '<h3>Verklaringen</h3>' + claims.map((c) => '<div class="ev' + (p.resolved[c.id] ? ' debunked' : '') + '"><b>' + U.esc(World.npc(s, c.npcId).name) + '</b>' + (p.resolved[c.id] ? ' <i>(doorgeprikt)</i>' : '') + '<p>' + U.esc(c.claim) + '</p></div>').join('');
+    } else if (tab === 'mensen') {
+      h += '<h3>Betrokkenen</h3>' + (met.map((n) => { const t = Rels.toneOf(s, n.id);
+        return '<div class="person"><span class="jframe" style="border-color:' + TONE_COLOR[t] + ';background:' + FAMILY[fam].photo + '">' + Silhouette.svg(n, { s: s, fam: fam, stance: TONE_STANCE[t], w: 44 }) + '</span><div><b>' + U.esc(n.name) + '</b>, ' + U.esc(n.role) + (n.kenmerk ? '. ' + U.esc(Rnd.cap(KENMERK[n.kenmerk].desc)) : '') + '<br><span class="sys">Doet ' + TONE_WORD[t] + ' tegen je.' + this.alibiNote(s, n) + '</span></div></div>'; }).join('') || '<p class="sys">Je hebt nog niemand gesproken.</p>');
+      if (figs.length) h += '<h3>Bijfiguren</h3><p class="sys">' + figs.map((c) => U.esc(c.name + ', ' + c.role)).join(' · ') + '</p>';
+    } else {
+      const q = (this.jQuery || '').trim().toLowerCase();
+      const renderLog = (query) => {
+        const list = s.log.slice(-80).filter((e) => {
+          if (!query) return true;
+          const who = e.k === 'p' || e.k === 'q' ? World.npc(s, e.npc).name : e.k === 'c' ? e.name : '';
+          return (who + ' ' + e.text).toLowerCase().indexOf(query) >= 0;
+        });
+        return list.map((e) =>
+          e.k === 'p' ? '<p><b>' + U.esc(World.npc(s, e.npc).name) + ':</b> ' + U.esc(e.text) + '</p>' :
+          e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan ' + U.esc(U.first(World.npc(s, e.npc))) + '):</b> <i>' + U.esc(e.text) + '</i></p>' :
+          e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + U.esc(e.text) + '</p>' :
+          '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + U.esc(e.text) + '</p>'
+        ).join('') || '<p class="sys">Geen regels gevonden voor "' + U.esc(query) + '".</p>';
+      };
+      h += '<div class="j-search"><label for="jSearch" class="sr-only">Zoek in logboek</label><input id="jSearch" type="search" placeholder="Zoek op naam, plaats of woord…" value="' + U.esc(this.jQuery || '') + '"></div>';
+      h += '<div id="jLogList">' + renderLog(q) + '</div>';
+    }
+    h += '</div>';
+
+    this.open('Dagboek', h, (e) => {
+      const tb = e.target.closest('[data-jtab]');
+      if (tb) { SFX.pin(); this.jTab = tb.dataset.jtab; this.journal({ focusSel: '[data-jtab="' + this.jTab + '"]' }); }
+    }, opt);
+    const inp = $('#jSearch');
+    if (inp) {
+      inp.oninput = () => {
+        this.jQuery = inp.value;
+        const box = $('#jLogList'); if (!box) return;
+        const q2 = inp.value.trim().toLowerCase();
+        const list = s.log.slice(-80).filter((e) => {
+          if (!q2) return true;
+          const who = e.k === 'p' || e.k === 'q' ? World.npc(s, e.npc).name : e.k === 'c' ? e.name : '';
+          return (who + ' ' + e.text).toLowerCase().indexOf(q2) >= 0;
+        });
+        box.innerHTML = list.map((e) =>
+          e.k === 'p' ? '<p><b>' + U.esc(World.npc(s, e.npc).name) + ':</b> ' + U.esc(e.text) + '</p>' :
+          e.k === 'q' ? '<p class="ask"><b>' + U.esc(U.first(s.protagonist)) + ' (vraag aan ' + U.esc(U.first(World.npc(s, e.npc))) + '):</b> <i>' + U.esc(e.text) + '</i></p>' :
+          e.k === 'c' ? '<p><b>' + U.esc(e.name) + ':</b> ' + U.esc(e.text) + '</p>' :
+          '<p class="' + (e.k === 's' ? 'sys' : 'narr') + '">' + U.esc(e.text) + '</p>'
+        ).join('') || '<p class="sys">Geen regels gevonden voor "' + U.esc(q2) + '".</p>';
+      };
+    }
   },
   // what the player knows about someone's alibi, in one short sentence (journal)
   alibiNote(s, n) {
@@ -730,12 +847,20 @@ const UI = {
     this.open('Contentpakket', h);
   },
   download(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); },
-  async system() {
+  async system(opt) {
     const s = this.s, b = this.btn, slots = [];
     for (let i = 1; i <= 3; i++) { const raw = await Store.get('slot' + i); let m = null; try { m = raw ? JSON.parse(raw) : null; } catch (e) { m = null; }
       slots.push(!m ? 'leeg' : m.schema !== APP.schema ? 'oude versie (schema ' + (m.schema || '?') + ')' : m.meta.title + ', ' + U.time(m.clock)); }
-    let h = '<h3>Opslaan en laden</h3>' + slots.map((m, i) => '<div class="row"><span class="slot">Slot ' + (i + 1) + ': ' + U.esc(m) + '</span>' + b('Opslaan', { x: 'save', v: i + 1 }) + b('Laden', { x: 'load', v: i + 1 }, m === 'leeg' ? 'dim' : '') + '</div>').join('');
-    h += '<p class="sys">Er wordt na elke actie automatisch opgeslagen.</p><div class="row">' + b('Exporteer als bestand', { x: 'export' }) + '<label class="chip file">Importeer bestand<input type="file" accept="application/json,.json" id="imp" hidden></label></div>';
+    const seg = (label, key, cur, opts) => '<div class="sys-row"><span class="sys-lbl">' + label + '</span><div class="row seg">' +
+      opts.map((o) => b(o[1], { x: key, v: o[0] }, cur === o[0] ? 'on' : '')).join('') + '</div></div>';
+    let h = '<h3>Weergave &amp; leesgemak</h3>' +
+      seg('Thema', 'theme', this.theme, [['auto', 'Systeem'], ['light', 'Licht'], ['dark', 'Donker']]) +
+      seg('Tekstgrootte', 'size', this.size, [['normal', 'Normaal'], ['large', 'Groot'], ['xlarge', 'Extra groot']]) +
+      seg('Lettertype', 'font', this.font, [['classic', 'Klassiek papier'], ['plain', 'Rustig leesfont']]) +
+      seg('Geluid', 'sound', SFX.muted ? 'off' : 'on', [['on', 'Aan'], ['off', 'Uit']]) +
+      '<p class="sys">Rustig leesfont vervangt cursieve en typemachine-lettertypen door een strak leeslettertype.</p>';
+    h += '<h3>Opslaan en laden</h3>' + slots.map((m, i) => '<div class="row"><span class="slot">Slot ' + (i + 1) + ': ' + U.esc(m) + '</span>' + b('Opslaan', { x: 'save', v: i + 1 }) + b('Laden', { x: 'load', v: i + 1 }, m === 'leeg' ? 'dim' : '') + '</div>').join('');
+    h += '<p class="sys">Er wordt na elke actie automatisch opgeslagen.</p><div class="row">' + b('Exporteer als bestand', { x: 'export' }) + '<label class="chip file">Importeer bestand<input type="file" accept="application/json,.json" id="imp" class="sr-only"></label></div>';
     if (this.oldRaw) h += '<p class="sys">Je vorige spel komt uit een oudere versie en kan niet meer geladen worden. Je kunt het bestand wel bewaren.</p><div class="row">' + b('Bewaar het oude bestand', { x: 'oldsave' }) + b('Vergeet het oude bestand', { x: 'oldforget' }, 'quiet') + '</div>';
     const LV_TXT = { makkelijk: 'Het bord trekt de draadjes voor je, verdachten met een bevestigd alibi vallen vanzelf af en opvallende plekken krijgen een vraagteken.',
       normaal: 'Je trekt de draadjes zelf. Een alibi valt pas af als je het controleert bij de persoon die het noemt. Opvallende plekken krijgen een vraagteken.',
@@ -747,23 +872,27 @@ const UI = {
     h += '<h3>Uitleg</h3><p class="sys">Het begeleide eerste bezoek en de tips over alibi\'s en draadjes komen terug bij je volgende bezoek.</p><div class="row">' + b('Uitleg opnieuw', { x: 'intro' }) + '</div>';
     const isBase = Content.cur === Content.base;
     h += '<h3>Contentpakket</h3><p class="sys">Actief: <b>' + U.esc(Content.cur.name) + '</b>, ' + Content.count(Content.cur) + ' tekstregels. Een geïmporteerd pakket wordt samengevoegd met de standaard; wat ontbreekt, komt uit de standaard.</p>' +
-      '<div class="row"><label class="chip file">Importeer contentpakket<input type="file" accept="application/json,.json" id="impContent" hidden></label>' + b('Exporteer standaardpakket', { x: 'cexport' }) + b('Herstel standaard', { x: 'creset' }, isBase ? 'dim' : '') + '</div>';
+      '<div class="row"><label class="chip file">Importeer contentpakket<input type="file" accept="application/json,.json" id="impContent" class="sr-only"></label>' + b('Exporteer standaardpakket', { x: 'cexport' }) + b('Herstel standaard', { x: 'creset' }, isBase ? 'dim' : '') + '</div>';
     h += '<p class="sys">' + APP.title + ' ' + APP.version + ', seed: ' + U.esc(s.seed) + '. Volledig offline. Klik drie keer op de titel voor het debug-paneel.</p>';
     this.open('Systeem', h, async (e) => {
       const t = e.target.closest('button[data-x]'); if (!t) return;
-      const x = t.dataset.x;
-      if (x === 'save') { await Store.put('slot' + t.dataset.v, Save.pack(s)); this.toast('Opgeslagen in slot ' + t.dataset.v + '.'); this.system(); }
-      if (x === 'load') { const raw = await Store.get('slot' + t.dataset.v); if (!raw) return; try { this.close(); this.load(Save.unpack(raw)); this.toast('Slot ' + t.dataset.v + ' geladen.'); } catch (err) { this.toast(err.message, 9000); } }
+      const x = t.dataset.x, v = t.dataset.v;
+      if (x === 'theme') { SFX.pin(); this.setTheme(v); this.render(); return this.system({ keepScroll: true, focusSel: 'button[data-x="theme"][data-v="' + v + '"]' }); }
+      if (x === 'size') { SFX.pin(); this.setSize(v); if (this.tab === 'board') this.fit(); return this.system({ keepScroll: true, focusSel: 'button[data-x="size"][data-v="' + v + '"]' }); }
+      if (x === 'font') { SFX.pin(); this.setFont(v); return this.system({ keepScroll: true, focusSel: 'button[data-x="font"][data-v="' + v + '"]' }); }
+      if (x === 'sound') { SFX.muted = (v === 'off'); this.savePrefs(); if (!SFX.muted) SFX.pin(); this.render(); return this.system({ keepScroll: true, focusSel: 'button[data-x="sound"][data-v="' + v + '"]' }); }
+      if (x === 'save') { await Store.put('slot' + v, Save.pack(s)); this.toast('Opgeslagen in slot ' + v + '.'); this.system({ keepScroll: true }); }
+      if (x === 'load') { const raw = await Store.get('slot' + v); if (!raw) return; try { this.close(); this.load(Save.unpack(raw)); this.toast('Slot ' + v + ' geladen.'); } catch (err) { this.toast(err.message, 9000); } }
       if (x === 'export') this.download('het-spoor-' + s.seed + '-dag' + s.clock.day + '.json', Save.pack(s));
       if (x === 'oldsave') this.download('het-spoor-oude-save.json', this.oldRaw);
-      if (x === 'oldforget') { await Store.put('oldAuto', ''); this.oldRaw = null; this.system(); }
+      if (x === 'oldforget') { await Store.put('oldAuto', ''); this.oldRaw = null; this.system({ keepScroll: true }); }
       if (x === 'start') this.showStart();
       if (x === 'new') { const seed = ($('#seedIn').value || '').trim(); if (seed) this.newGame(seed); else this.showStart(); }
-      if (x === 'intro') { this.intro = Coach.fresh(); this.savePrefs(); this.toast('De uitleg begint opnieuw bij je volgende bezoek.'); this.system(); }
-      if (x === 'level') { SFX.pin(); this.setLevel(t.dataset.v); this.system(); }
+      if (x === 'intro') { this.intro = Coach.fresh(); this.savePrefs(); this.toast('De uitleg begint opnieuw bij je volgende bezoek.'); this.system({ keepScroll: true }); }
+      if (x === 'level') { SFX.pin(); this.setLevel(v); this.system({ keepScroll: true, focusSel: 'button[data-x="level"][data-v="' + v + '"]' }); }
       if (x === 'cexport') this.download('het-spoor-content-standaard.json', Content.rawText);
-      if (x === 'creset') { if (Content.cur === Content.base) return; await Store.put('contentPack', ''); Content.reset(); this.toast('Standaardpakket hersteld.'); this.system(); }
-    });
+      if (x === 'creset') { if (Content.cur === Content.base) return; await Store.put('contentPack', ''); Content.reset(); this.toast('Standaardpakket hersteld.'); this.system({ keepScroll: true }); }
+    }, opt);
     $('#impContent').onchange = (e) => { const file = e.target.files[0]; if (!file) return; const r = new FileReader();
       r.onload = async () => { const res = Content.importPack(r.result); if (res.ok) await Store.put('contentPack', r.result); this.contentReport(res); }; r.readAsText(file); };
     $('#imp').onchange = (e) => { const file = e.target.files[0]; if (!file) return; const r = new FileReader();
