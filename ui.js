@@ -150,7 +150,7 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sbSel: [], sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
   _shell: null, _headHtml: null, _stageKey: null, _drawerHtml: null, _drawerId: null, _coachHtml: null, _boardLayout: null, _boardRO: null, _rafThreads: 0, _noteSaveT: null,
   btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
 
@@ -193,7 +193,7 @@ const UI = {
     clearTimeout(this.typeTimer);
     this.closePeek();
     this.s = s; this.sel = null; this.link = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.feed = [];
-    this.boardMode = 'board'; this.threadKind = 'verband'; this.hintTier = 1; this.hintTurn = -1;
+    this.boardMode = 'board'; this.threadKind = 'verband'; this.sbSel = []; this.hintTier = 1; this.hintTurn = -1;
     this.tab = s.visit ? 'visit' : 'board';
     this._stageKey = null; this._headHtml = null; this._drawerHtml = null; this._coachHtml = null;
     $('#app').hidden = false; this.after();
@@ -512,6 +512,7 @@ const UI = {
     if (ae.dataset.card) return `[data-card="${ae.dataset.card}"]`;
     if (ae.dataset.stn) return `[data-stn="${ae.dataset.stn}"]`;
     if (ae.dataset.hs) return `[data-hs="${ae.dataset.hs}"]`;
+    if (ae.dataset.sb) return `[data-sb="${ae.dataset.sb}"]`;
     if (ae.id) return '#' + ae.id;
     if (ae.dataset.sp && ae.dataset.id && ae.dataset.v) return `[data-sp="${ae.dataset.sp}"][data-id="${ae.dataset.id}"][data-v="${ae.dataset.v}"]`;
     if (ae.dataset.ui && ae.dataset.v) return `[data-ui="${ae.dataset.ui}"][data-v="${ae.dataset.v}"]`;
@@ -568,7 +569,8 @@ const UI = {
       JSON.stringify(s.play.cleared || {}),
       JSON.stringify(s.play.debunked || {}),
       JSON.stringify(s.play.resolved || {}),
-      this.boardMode === 'matrix' ? JSON.stringify(s.play.asked || {}) + JSON.stringify(s.play.alibiCheck || {}) : ''
+      this.boardMode === 'matrix' || this.boardMode === 'timeline' ? JSON.stringify(s.play.asked || {}) + JSON.stringify(s.play.alibiCheck || {}) : '',
+      this.boardMode === 'timeline' ? Object.keys(s.play.found || {}).join(',') + '|' + (this.sbSel || []).join(',') : ''
     ].join('|');
   },
   renderHead(s, sh) {
@@ -607,7 +609,7 @@ const UI = {
       this.stopBoardObserver();
       const v = s.visit;
       if (v.conv && typeof Interrogation !== 'undefined') {
-        const ivKey = 'iv:' + v.conv + ':' + s.play.logN + ':' + (this.showEv ? '1' : '0') + ':' + JSON.stringify(this.deltas || {}) + ':' +
+        const ivKey = 'iv:' + v.conv + ':' + Rels.toneOf(s, v.conv) + ':' + s.play.logN + ':' + (this.showEv ? '1' : '0') + ':' + JSON.stringify(this.deltas || {}) + ':' +
           Object.keys(s.play.found).length + ':' + Object.keys(s.play.resolved).length + ':' + (v.used[v.conv] || []).length + ':' + s.player.money + ':' + fam;
         if (this._stageKey === ivKey && sh.stage.querySelector('.iv')) {
           this.patchIvApproach(sh);
@@ -646,18 +648,21 @@ const UI = {
       return;
     }
 
-    // Zaakbord (Prikbord or Verdachtenoverzicht)
+    // Zaakbord (Prikbord, Verdachtenoverzicht or Spoorboek)
     const bKey = this.boardContentKey(s, fam);
-    if (this._stageKey === bKey && ((this.boardMode === 'board' && sh.stage.querySelector('.bd')) || (this.boardMode === 'matrix' && sh.stage.querySelector('.mx-wrap')))) {
-      this.patchBoardSelection(s, sh);
+    if (this._stageKey === bKey && ((this.boardMode === 'board' && sh.stage.querySelector('.bd')) || (this.boardMode === 'matrix' && sh.stage.querySelector('.mx-wrap')) || (this.boardMode === 'timeline' && sh.stage.querySelector('.sb-wrap')))) {
+      if (this.boardMode !== 'timeline') this.patchBoardSelection(s, sh);
       return;
     }
     const prevBw = sh.stage.querySelector('.bw'), bwTop = prevBw ? prevBw.scrollTop : 0, bwLeft = prevBw ? prevBw.scrollLeft : 0;
-    const res = Board.html(s, fam, this.sel, this.link, { mode: this.boardMode, threadKind: this.threadKind });
+    const prevSb = sh.stage.querySelector('.sb-scroll'), sbLeft = prevSb ? prevSb.scrollLeft : 0;
+    const res = Board.html(s, fam, this.sel, this.link, { mode: this.boardMode, threadKind: this.threadKind, sbSel: this.sbSel, map: this.map() });
     this._boardLayout = res.L;
     sh.stage.innerHTML = `<div class="bw">${res.html}</div>`;
     const nextBw = sh.stage.querySelector('.bw');
     if (nextBw) { nextBw.scrollTop = bwTop; nextBw.scrollLeft = bwLeft; }
+    const nextSb = sh.stage.querySelector('.sb-scroll');
+    if (nextSb) nextSb.scrollLeft = sbLeft;
     this._stageKey = bKey;
     if (this.boardMode === 'board') { this.observeBoard(); this.scheduleThreads(); }
     else this.stopBoardObserver();
@@ -951,6 +956,20 @@ const UI = {
     }
     if (d.stn) { SFX.pin(); this.stn = this.stn === d.stn ? null : d.stn; return this.render(true); }
     if (d.hs) { SFX.pin(); this.hot = this.hot === d.hs ? null : d.hs; return this.render(true); }
+    if (d.sb) {
+      const id = d.sb, cur = this.sbSel || [], idx = cur.indexOf(id);
+      if (idx >= 0) this.sbSel = cur.filter((x) => x !== id);
+      else if (cur.length >= 2) this.sbSel = [id];
+      else this.sbSel = cur.concat([id]);
+      if (this.sbSel.length === 2) {
+        const M = this.map(), D = Spoorboek.build(s, M), cmp = Spoorboek.compare(s, D, this.sbSel, M);
+        if (cmp && cmp.kind === 'conflict') SFX.aha('alibi');
+        else if (cmp && cmp.kind === 'match') SFX.aha('clear');
+        else if (cmp && cmp.kind === 'clue') SFX.aha('clue');
+        else SFX.pin();
+      } else SFX.pin();
+      return this.render(true);
+    }
     const u = d.ui || d.sp;
     switch (u) {
       case 'tab':
@@ -960,7 +979,14 @@ const UI = {
         return this.render();
       case 'bmode':
         SFX.pin();
-        if (d.v === 'board' || d.v === 'matrix') { this.boardMode = d.v; if (d.v === 'matrix') this.link = null; }
+        if (d.v === 'board' || d.v === 'matrix' || d.v === 'timeline') {
+          this.boardMode = d.v;
+          if (d.v !== 'board') this.link = null;
+          if (d.v === 'timeline') this.sel = null;
+        }
+        return this.render(true);
+      case 'sb-clear':
+        SFX.pin(); this.sbSel = [];
         return this.render(true);
       case 'thkind':
         SFX.pin();
@@ -1074,7 +1100,7 @@ const UI = {
   },
   bind() {
     if (this.bound) return; this.bound = true; const root = $('#app');
-    const target = (e) => e.target.closest('[data-mention],[data-ui],[data-sp],[data-card],[data-stn],[data-hs]');
+    const target = (e) => e.target.closest('[data-mention],[data-ui],[data-sp],[data-card],[data-stn],[data-hs],[data-sb]');
     root.addEventListener('click', (e) => {
       if (e.target.closest('[data-ui="title"]')) { this.taps++; clearTimeout(this.tt); this.tt = setTimeout(() => { this.taps = 0; }, 650); if (this.taps >= 3) { this.taps = 0; Debug.open(); } return; }
       const t = target(e); if (t && t.tagName !== 'SELECT') this.act(t);
@@ -1120,7 +1146,7 @@ const UI = {
         if (peek && !peek.hidden) return this.closePeek();
         if (modal && !modal.hidden) return this.close();
         if (document.activeElement && document.activeElement.id === 'cardNote') { document.activeElement.blur(); return; }
-        if (this.sel || this.link || this.hot || this.stn) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.render(); }
+        if (this.sel || this.link || this.hot || this.stn || (this.sbSel && this.sbSel.length)) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.sbSel = []; this.render(); }
         return;
       }
       const radio = e.target.closest && e.target.closest('#app [role="radio"][data-ui="st-level"]');
@@ -1131,7 +1157,7 @@ const UI = {
         SFX.pin(); this.level = next; this.savePrefs(); this.renderScreen(next); return;
       }
       if (e.key !== 'Enter' && e.key !== ' ') return;
-      const t = e.target.closest && e.target.closest('#app [data-card],#app [data-stn],#app [data-hs]'); if (!t || t.tagName === 'BUTTON') return;
+      const t = e.target.closest && e.target.closest('#app [data-card],#app [data-stn],#app [data-hs],#app [data-sb]'); if (!t || t.tagName === 'BUTTON') return;
       e.preventDefault(); this.act(t);
     });
     const hot = (e, on) => { const g = e.target.closest && e.target.closest('g[data-hs]'), svg = g && g.ownerSVGElement; if (!svg) return;
@@ -1670,7 +1696,7 @@ const Debug = {
     } else if (this.tab === 'act') {
       h += '<h3>Bezoek forceren</h3><p class="sys">Opent een bezoek, ook als de plek dicht is. Kost geen dagdeel.</p><div class="row">' + s.world.locations.map((l) => b(U.esc(l.name), { d: 'force', v: l.id })).join('') + '</div>';
       h += '<h3>Dagdeel</h3><div class="row">' + b('Volgend dagdeel', { d: 'part' }) + '<span class="sys">Nu: ' + U.esc(U.time(s.clock)) + '</span></div>';
-      h += '<h3>Bereikbaarheid</h3><div class="row">' + b('Solver: papierroute', { d: 'solve', v: 'paper' }) + b('Solver: mensenroute', { d: 'solve', v: 'people' }) + b('Plan: papierroute', { d: 'plan', v: 'paper' }) + b('Plan: mensenroute', { d: 'plan', v: 'people' }) + '</div><pre id="dbgOut"></pre>';
+      h += '<h3>Bereikbaarheid &amp; Klokbalans</h3><div class="row">' + b('Solver: papierroute', { d: 'solve', v: 'paper' }) + b('Solver: mensenroute', { d: 'solve', v: 'people' }) + b('Plan: papierroute', { d: 'plan', v: 'paper' }) + b('Plan: mensenroute', { d: 'plan', v: 'people' }) + b('SimPlayer (30 seeds)', { d: 'sim' }) + '</div><pre id="dbgOut"></pre>';
       h += '<h3>Seed</h3><div class="row"><input id="dbgSeed" value="' + U.esc(s.seed) + '" autocapitalize="off">' + b('Nieuw spel met deze seed', { d: 'seed' }) + '</div>';
     } else {
       h += '<div class="row">' + b('Draai zelftest (30 seeds)', { d: 'run' }) + '</div><div id="dbgTests"></div>';
@@ -1686,6 +1712,14 @@ const Debug = {
         case 'solve': { const r = Solver.run(s, v); $('#dbgOut').textContent = 'Route ' + v + ': motief ' + (r.motive ? 'ja' : 'nee') + ', methode ' + (r.method ? 'ja' : 'nee') + ', sporen ' + r.found + '.'; return; }
         case 'plan': { const r = Solver.plan(s, v); $('#dbgOut').textContent = 'Plan ' + v + ': ' + (r.ok ? 'haalbaar' : 'NIET haalbaar') + ' in ' + r.parts + ' dagdelen, ' + r.visits + ' bezoeken.\n' +
           r.path.map((x) => '  dag ' + x.day + ', ' + PARTS[x.part] + ': ' + World.loc(s, x.locId).name + ' -> ' + x.got.join(', ')).join('\n'); return; }
+        case 'sim': {
+          const r = SimPlayer.bench(30, Level.id(s));
+          $('#dbgOut').textContent = 'SimPlayer (' + r.level + ', ' + r.n + ' seeds, niet-alwetend):\n' +
+            '  Opgelost: ' + r.won + '/' + r.n + ' (' + r.winRate + '%, binnen ' + DAY.soft + ' dagen: ' + r.withinSoft + ')\n' +
+            '  Gemiddeld: ' + r.avgDays + ' dagen (' + r.avgParts + ' dagdelen), ' + r.avgVisits + ' bezoeken, hoogstens dag ' + r.maxDay + '\n' +
+            '  Gem. foute aanklachten: ' + r.avgWrong + (r.failed.length ? '\n  Niet opgelost: ' + r.failed.join(', ') : '');
+          return;
+        }
         case 'seed': return UI.newGame($('#dbgSeed').value.trim());
         case 'pool': { const k = $('#dbgKey').value.trim(), era = $('#dbgEra').value; if (!Content.schemaFor(k)) { $('#dbgPool').textContent = 'Onbekende sleutel.'; return; }
           const use = (s.play.lineUse && s.play.lineUse.day === s.clock.day) ? s.play.lineUse.n : {};

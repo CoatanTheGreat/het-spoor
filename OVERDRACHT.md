@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.16.0)
+# Het Spoor, overdracht (stand v0.17.0)
 
-Dit document hoort bij `het-spoor` (`v0.16.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
+Dit document hoort bij `het-spoor` (`v0.17.0`). Het beschrijft wat er gebouwd is, waarom, en wat er nog openstaat.
 
 ## Werkwijze
 
@@ -17,13 +17,13 @@ Dit document hoort bij `het-spoor` (`v0.16.0`). Het beschrijft wat er gebouwd is
 
 | Bestand | Inhoud |
 |---|---|
-| content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen |
+| content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen (incl. twists `dubbel`/`slachtofferliegt` en relatie-effecten) |
 | lib.js | Plot-DNA, naamgeving, wereld en cast |
-| engine.js | Zaakopbouw, regels, acties (o.a. `Act.confrontWrong`), bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), solver en tests |
-| views.js | Inktlijn-/houtsnede-portretten (`Silhouette`), responsief zaakbord, verdachtenoverzicht, kaartgenerator (`MapGen`), diepere tableau-scènes (`Tableau`), verhoor en coach |
-| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), "Aha!"-feedback (`#aha`), uitgebreide 0 KB WebAudio `SFX`, bevestigingen, schermen, invoer, modals en debugpaneel |
+| engine.js | Zaakopbouw (5 twists), regels, acties (o.a. `Act.confrontWrong`, `verzoen`, `giveWarmTip`, `hostileSpread`), bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), `Solver`, niet-alwetende `SimPlayer` en tests |
+| views.js | Inktlijn-/houtsnede-portretten (`Silhouette`), responsief zaakbord, verdachtenoverzicht, interactief Spoorboek (`Spoorboek`), kaartgenerator (`MapGen`), diepere tableau-scènes (`Tableau`), verhoor en coach |
+| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), "Aha!"-feedback (`#aha`), uitgebreide 0 KB WebAudio `SFX`, bevestigingen, schermen, invoer, modals en debugpaneel (incl. `SimPlayer`) |
 
-Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.16.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen`, `player.seenJournal` en `play.knownSched` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `play.knownSched`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
+Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.17.0 worden gelezen; een oudere save krijgt bij het laden een klok (begin van het dagdeel), een positie, een lijst genoemde personen/plaatsen uit het logboek, en lege standaarden voor `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `play.knownSched`, `play.warmTip` en `play.hostileSpread` (zonder valse "Nieuw"-badges). Optionele velden (`player.threads` met optionele 3e betekenis-tag, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `play.knownSched`, `play.warmTip`, `play.hostileSpread`) blijven achterwaarts compatibel; oude koppelingen (`player.links`) worden bij het laden omgezet naar draadjes. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
 
 ## Wat er per fase gebouwd is
 
@@ -210,18 +210,44 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.16.0 
   - `Act.confrontWrong` + tijdloze `confront.wrong.{warm,neutral,cold,hostile}`-tekstbanken geven bij een fout bewijsstuk tijdens een confrontatie een directe, in-character reactie in het verhoortranscript (met eigen spreekstijl, 0 minuten klokkoste, hooguit één milde relatie-tik per stuk per gesprek en 100% lekvrij).
   - `SFX` uitgebreid met 0 KB WebAudio-geluiden voor `thread(kind)`, `stamp()`, `folder()`, `steps()`, `aha(kind)`, `miss()` en `solved()` (naast `paper`, `pin`, `type`, `bell`, `seal`).
 
-## Meetwaarden (stand v0.16.0)
+### Fase G, v0.17.0: interactief Spoorboek, extra Plot-DNA-twists, relatie-effecten & klokbalans (`SimPlayer`)
+- **Interactief Spoorboek op het Zaakbord (`Spoorboek.build`, `Spoorboek.compare`, `Spoorboek.renderSvg`, `Spoorboek.html`, `Board.bar` in `views.js`, `ui.js`, `style.css`):**
+  - Derde tabblad naast *Prikbord* en *Verdachtenoverzicht*: *Spoorboek (N)* toont een interactieve avondtijdlijn (18:00–24:00) met alleen door de speler ontdekte feiten (gevraagde alibi's, getuigenwaarneming met kenmerk, weerlegde alibi's, registervermeldingen, doorgeprikte bekentenissen en een eventuele `dubbel`-afleiding) — 100% lekvrij (geen dader- of castvolgorde-lek).
+  - Tikken (of Enter/Spatie) op twee balken of punten op het diagram of in de toegankelijke kaartlijst eronder toetst direct op tegenstrijdigheden (`conflict`, met rode markering/zigzag), bevestigingen (`match`), kenmerk-/looptijdverbanden (`clue`, inclusief werkelijke looptijd via `MapGen.travel`) of neutraal verschil, met klikbare `[data-mention]`-spiekkaarten in het oordeel en `Wis selectie` / `Escape`.
+  - Gestapelde alibi-labels wisselen links/rechts van de balk zodat ze nooit botsen; donkere modus en smalle/iPad-schermen (horizontaal schuivend diagram zonder pagina-overloop) zijn volledig WCAG AA-leesbaar.
+- **Extra Plot-DNA-twists (`content.js`, `engine.js`):**
+  - **`dubbel` ("Dubbele misdaad"):** korte afleiding op een andere locatie (`truth.twistLocId`) met eigen werkwijze-spoor (`twist_double`, alleen beginletter, geen naamlek), figurantengerucht (`crowd.twist.dubbel`), eigen eindverslagalinea (`end.twist.dubbel`) en afleidingspunt met looptijdberekening op het Spoorboek.
+  - **`slachtofferliegt` ("Het slachtoffer loog"):** eigen motief-spoor (`twist_victim_lie`, alleen beginletter, geen naamlek) waaruit blijkt dat het slachtoffer zelf niet brandschoon was, met figurantengerucht (`crowd.twist.slachtofferliegt`) en eigen eindverslagalinea (`end.twist.slachtofferliegt`).
+  - Alle vijf twist-varianten (`zondebok`, `medeplichtige`, `dubbel`, `slachtofferliegt`, `geen`) zijn actief en afgedekt door schema- en regressietests.
+- **Relatie-effecten (`Dialogue`, `Act`, `Interrogation.html`, `content.js`):**
+  - **Herstel (`verzoen`):** bij een `cold`- of `hostile`-band verschijnt de kaart *Rustig herbeginnen* (*Herstel*), waarmee je wrok (-8) en argwaan (-6) verlaagt en vertrouwen (+6) herstelt — geen enkele zaak kan vastlopen door een stroeve start.
+  - **Warme band (`warm`):** halveert de trakteerkosten in de herberg (`Dialogue.treatCost`: 1 i.p.v. 2, gelabeld *vriendenprijs*) met sterkere relatieboost, en levert éénmaal per persoon vrijwillig een lekvrije roostertip over een andere betrokkene op (`Dialogue.giveWarmTip`, opgeslagen in `s.play.knownSched` en gemeld via `#aha`).
+  - **Vijandige afloop (`hostile`):** het verlaten van een vijandig verhoor (`Act.talkEnd`) verspreidt eenmalig milde argwaan (+4) naar één aanwezige op dezelfde plek (`s.play.hostileSpread`), 100% deterministisch en lekvrij.
+- **Klokbalans met niet-alwetende simulatiespeler (`SimPlayer` in `engine.js`, Debug-tab *Acties*):**
+  - `SimPlayer.run` / `SimPlayer.bench` speelt uitsluitend via publieke UI-staat en `Act.*`-acties (leest nooit `truth.culpritId`, `truth.roles`, ongevraagde alibi's, ongevonden sporen of privé-NPC-velden).
+  - Meting over 30 seeds per niveau:
+    - **Makkelijk:** 30/30 opgelost (100%), gem. **1,40 dagen** (3,43 dagdelen, 11,5 bezoeken), max. dag 2, 30/30 binnen 4 dagen.
+    - **Normaal:** 30/30 opgelost (100%), gem. **1,77 dagen** (4,50 dagdelen, 11,9 bezoeken), max. dag 2, 30/30 binnen 4 dagen.
+    - **Moeilijk:** 30/30 opgelost (100%), gem. **1,77 dagen** (4,53 dagdelen, 11,8 bezoeken), max. dag 2, 30/30 binnen 4 dagen.
+  - Conclusie: `COST` (15/30 min op Normaal & Moeilijk, 10/20 min op Makkelijk) geeft een ruime, eerlijke 2–3,5-daagse spelervaring voor echte spelers binnen de 4-daagse soft-limiet zonder tijds-softlocks; geen kunstmatige verschuiving nodig.
 
-- **72 tests, alle groen in Node** (68 bestaand — met uitgebreide dader-lektest voor 4-stemmingenportretten en geüpdatete kaart-badge-test — + 4 nieuwe Fase F-regressietests voor houtsnede-portretten op 40 px/72 px/full, diepere Tableau-scènes per dagdeel × tijdvak, rustige kaart-badgedichtheid over 30 seeds en lekvrije in-character `Act.confrontWrong`).
-- **20/20 headless Chromium Fase F UI-rookchecks groen** (0 console-/runtime-fouten): alle 4 portretstemmingen en kenmerken op Zaakbord, Verdachtenmatrix, Detailpaneel, Verhoor en Figurengalerij; Tableau ochtend/avond-lichtval, `960×540` hotspot-grenzen en in-place hotspot-patching; rustige kaart-badges (`<= 5` per locatie, `<= 1` onbekenden-badge); alle 12 `SFX`-methoden foutloos; `#aha`-feedback bij nieuw spoor, gebroken alibi en doorgeprikte verklaring; in-character reactie bij fout bewijs zonder toast of tijdverlies; geen horizontale overloop in donkere modus op desktop (`1280×820`), staande iPad (`768×1024`) en 200% zoom (`640×420`).
+## Meetwaarden (stand v0.17.0)
+
+- **76 tests, alle groen in Node** (72 bestaand — met alle 5 twists in de twist-test en `Spoorboek.html` in de dader-lektest — + 4 nieuwe Fase G-regressietests voor Spoorboek-lekvrijheid/vergelijking, `dubbel` & `slachtofferliegt`, relatie-effecten + schema-8 compatibiliteit, en niet-alwetende `SimPlayer`-klokbalans).
+- **19/19 headless Chromium Fase G UI-rookchecks groen** (0 console-/runtime-fouten): 3 Zaakbord-tabs, leeg start-Spoorboek (lekvrij), alibi/weerlegging-conflict, `dubbel`-afleiding + looptijd, klikbare `[data-mention]` → `#peek` vanuit Spoorboek, `Wis selectie`, donkere modus met geverifieerd kaartcontrast, `verzoen`-kaart + `vriendenprijs`-traktatie + `warmTip`-`#aha` in het verhoor, Debug *SimPlayer (30 seeds)*-knop, en geen pagina-overloop op `1280×820`, `768×1024` (iPad staand) en `640×420` (200% zoom).
 - Roadmap-status:
   - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
   - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
   - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar (commit `aaf3ab6`)
   - **Fase E (`v0.15.0`)**: klaar (commit `aeb6ecf`)
-  - **Fase F (`v0.16.0`)**: klaar
-  - **Volgende stap — Fase G (`v0.17.0`)**: interactief Spoorboek (tijdlijn), extra Plot-DNA-twists (`dubbel`, `slachtofferliegt`), relatie-effecten en klokbalans met niet-alwetende simulatiespeler.
-  - **Daarna — Fase H (`v0.18.0`)**: PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat.
+  - **Fase F (`v0.16.0`)**: klaar (commit `2e16ffb`)
+  - **Fase G (`v0.17.0`)**: klaar
+  - **Volgende stap — Fase H (`v0.18.0`)**: PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat.
+
+## Meetwaarden (stand v0.16.0)
+
+- **72 tests, alle groen in Node** (68 bestaand — met uitgebreide dader-lektest voor 4-stemmingenportretten en geüpdatete kaart-badge-test — + 4 nieuwe Fase F-regressietests voor houtsnede-portretten op 40 px/72 px/full, diepere Tableau-scènes per dagdeel × tijdvak, rustige kaart-badgedichtheid over 30 seeds en lekvrije in-character `Act.confrontWrong`).
+- **20/20 headless Chromium Fase F UI-rookchecks groen** (0 console-/runtime-fouten): alle 4 portretstemmingen en kenmerken op Zaakbord, Verdachtenmatrix, Detailpaneel, Verhoor en Figurengalerij; Tableau ochtend/avond-lichtval, `960×540` hotspot-grenzen en in-place hotspot-patching; rustige kaart-badges (`<= 5` per locatie, `<= 1` onbekenden-badge); alle 12 `SFX`-methoden foutloos; `#aha`-feedback bij nieuw spoor, gebroken alibi en doorgeprikte verklaring; in-character reactie bij fout bewijs zonder toast of tijdverlies; geen horizontale overloop in donkere modus op desktop (`1280×820`), staande iPad (`768×1024`) en 200% zoom (`640×420`).
 
 ## Meetwaarden (stand v0.15.0)
 
@@ -267,9 +293,5 @@ Opslag gebeurt via IndexedDB, met schema 8. Saves uit v0.8.0 tot en met v0.16.0 
 
 ## Wat nog openstaat
 
-### Afstemming
-- De tijdsdruk is lichter geworden. Een vaste simulatiespeler die niet alwetend is, en eventuele bijstelling van `COST` of daglengte, staan gepland in Fase G.
-
-### Nog op te pakken in vervolgfasen
-- Interactief Spoorboek (tijdlijn), extra Plot-DNA-twists (`dubbel` en `slachtofferliegt`), relatie-effecten en klokbalans met niet-alwetende simulatiespeler (Fase G).
-- PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat (Fase H).
+### Nog op te pakken in vervolgfase
+- PWA (manifest, icoon, Service Worker), save-migratieketen en geautomatiseerde Playwright/a11y-teststraat (Fase H, `v0.18.0`).

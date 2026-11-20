@@ -499,6 +499,28 @@ const DEFAULT_CONTENT = {
    "Volgens {obj} van {place} was {comp} er die avond, maar van {c} is geen spoor. Het alibi dat {comp} bevestigde, klopt niet.",
    "De aantekeningen in {obj} van {place} laten geen ruimte voor twijfel: {c} was daar die avond niet. {comp} heeft voor {c} gelogen."
   ],
+  "ev.twist.double.title": [
+   "Het tweede voorval bij {loc}"
+  ],
+  "ev.twist.double.item": [
+   "een gescheurde notitie"
+  ],
+  "ev.twist.double.text": [
+   "Bij {obj} in {loc} ligt een verslag van een kleiner voorval, een klein uur vóór {hour} uur. De afleiding trok alle aandacht weg bij {crimeloc}; in de rand staat dezelfde paraaf: {initial}.",
+   "Tussen {obj} vind je het spoor van een tweede, kleiner vergrijp bij {loc}, vlak voor {hour} uur. Een rookgordijn om vrij spel te hebben bij {crimeloc}, getekend met de beginletter {initial}.",
+   "Het kleinere voorval bij {loc} bleek geen toeval: in {obj} staat een haastige aantekening met de letter {initial} die de afleiding rechtstreeks aan {crimeloc} koppelt."
+  ],
+  "ev.twist.victimLie.title": [
+   "De verzwegen waarheid van {v}"
+  ],
+  "ev.twist.victimLie.item": [
+   "een verborgen verklaring"
+  ],
+  "ev.twist.victimLie.text": [
+   "Verborgen bij {obj} in {loc} ligt een eigen verklaring van {v}. Wat {v} naar buiten bracht bleek onwaar: achter gesloten deuren liep een oud geschil met iemand onder de letter {initial}.",
+   "In {obj} van {loc} vind je een stuk waarin {v} een eerdere leugen toegeeft. Het echte conflict speelde niet waar iedereen dacht, maar met een bekende met beginletter {initial}.",
+   "Achter {obj} bij {loc} duikt bewijs op dat {v} zelf de waarheid verdraaide. De verzwegen afspraak draait om een schuld tegenover iemand met de paraaf {initial}."
+  ],
   "ev.alibiBreak.text": [
    "{c} zei die avond in {other} te zijn, maar {witness} weet daar niets van. Onder druk geeft {c} toe: rond {hour} uur was {hij} bij {loc}.",
    "Het verhaal over {other} houdt geen stand. {witness} was er wel, {c} niet. Uiteindelijk geeft {c} toe dat {hij} rond {hour} uur bij {loc} was.",
@@ -1007,6 +1029,16 @@ const DEFAULT_CONTENT = {
    "Vraag {comp} niet naar {c}. Die twee zijn als broer en zus.",
    "Als {comp} iets bevestigt over {c}, zou ik het nog eens nakijken."
   ],
+  "crowd.twist.dubbel": [
+   "Eerder die avond was er ook al gedoe bij {loc}. Iedereen rende erheen, en niemand lette meer op de rest.",
+   "Vreemd genoeg gebeurde er kort daarvoor ook iets kleins bij {loc}. Te toevallig, als je het mij vraagt.",
+   "Wie weet hing die ophef bij {loc} wel samen met de grote zaak. Alle ogen waren even weg."
+  ],
+  "crowd.twist.slachtofferliegt": [
+   "Met alle respect voor {v}, maar niet alles wat die de laatste tijd vertelde klopte.",
+   "{v} hield graag de schijn op. Achter dat nette verhaal zat meer dan iedereen denkt.",
+   "Ik mag het misschien niet zeggen, maar {v} sprak zelf ook niet altijd de hele waarheid."
+  ],
   "obj.examine": [
    "Je onderzoekt {obj}.",
    "Je bekijkt {obj} van dichtbij.",
@@ -1287,6 +1319,35 @@ const DEFAULT_CONTENT = {
   "end.twist.medeplichtige": [
    "Ook {comp} moet zich verantwoorden: wie een vals alibi geeft, draagt een deel van de schuld.",
    "{comp} loog uit trouw aan {name}. Die trouw kost nu een hoge prijs."
+  ],
+  "end.twist.dubbel": [
+   "Het kleinere voorval bij {loc} blijkt een bewuste afleiding van {name}: terwijl de stad daarheen keek, sloeg {hij} toe.",
+   "Twee voorvallen op één avond, één brein erachter. De ophef bij {loc} gaf {name} precies de ruimte die nodig was."
+  ],
+  "end.twist.slachtofferliegt": [
+   "Ook de schaduwkant van {victim} komt aan het licht: het verzwegen verhaal waar niemand over sprak, vormde de vonk voor de daad van {name}.",
+   "Dat {victim} zelf de waarheid achterhield, maakte het spoor troebel — maar het praat de daad van {name} niet goed."
+  ],
+  "rel.reconcile": [
+   "Goed dan. Laten we opnieuw beginnen, maar dan zonder dat gedram.",
+   "Een diepe zucht. Ik waardeer dat je even pas op de plaats maakt. Wat wil je weten?",
+   "Vooruit, ik vergeet dat vorige gesprek. Praat normaal met me, dan praat ik terug.",
+   "Laten we het rustig houden. Als je eerlijk vraagt, zal ik eerlijk antwoorden."
+  ],
+  "rel.warmTip.sched": [
+   "Omdat ik je vertrouw, nog één ding: {target} kom je in de {part} geregeld tegen bij {place}.",
+   "Tussen ons gezegd: als je {target} zoekt, probeer dan {place} eens in de {part}.",
+   "Ik mag het eigenlijk niet rondstrooien, maar in de {part} zit {target} vaak bij {place}."
+  ],
+  "rel.warmTip.loc": [
+   "Omdat je oprecht luistert: ik zou bij {place} nog eens heel goed rondkijken.",
+   "Een tip tussen ons: er ligt bij {place} vast meer dan men op het eerste gezicht ziet.",
+   "Als ik in jouw schoenen stond, nam ik nog eens de tijd om alles bij {place} na te lopen."
+  ],
+  "rel.hostileSpread": [
+   "De gespannen sfeer rond {first} blijft niet onopgemerkt: {other} kijkt je voortaan wat argwanender aan.",
+   "{first} wisselt een korte, veelzeggende blik met {other}. De onrust slaat over.",
+   "Na de botsing met {first} merk je dat ook {other} iets voorzichtiger is geworden."
   ],
   "end.quality.0": [
    "Het kostte veel, misschien te veel.",

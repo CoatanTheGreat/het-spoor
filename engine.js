@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.16.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.17.0', schema: 8 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -25,8 +25,8 @@ const TONE_FIT = {
   scherp: { warm: ['bad', { trust: -1, affection: 1, suspicion: 2 }], reserved: ['ok', { trust: 1 }], sharp: ['good', { trust: 3, suspicion: 1 }] },
   peinzend: { warm: ['ok', { trust: 2, affection: 2 }], reserved: ['good', { trust: 3, affection: 1 }], sharp: ['bad', { trust: -3, resentment: 3, suspicion: 2 }] }
 };
-// v0.9.0 (voorstel 7): the plot-DNA twist decides one game twist
-const TWIST_GAME = { zondebok: 'zondebok', manipulatie: 'zondebok', valsegetuige: 'medeplichtige', identiteit: 'medeplichtige', aangever: 'medeplichtige' };
+// v0.9.0 / v0.17.0: the plot-DNA twist decides one game twist (including dubbel & slachtofferliegt)
+const TWIST_GAME = { zondebok: 'zondebok', manipulatie: 'zondebok', valsegetuige: 'medeplichtige', identiteit: 'medeplichtige', aangever: 'medeplichtige', dubbel: 'dubbel', slachtofferliegt: 'slachtofferliegt' };
 const TONE_WORD = { warm: 'hartelijk', neutral: 'beleefd', cold: 'koel', hostile: 'vijandig' };
 // v0.8.0 (fase 3a, nieuw B): a much larger object pool per place type, with era-bound objects. Each entry is
 // [name, prop, eras]; prop is what the tableau draws (for the inn: one of its five fixed spots), eras = null means all.
@@ -196,11 +196,20 @@ const Content = {
     def('obj.y.alibi', 'narr', 2, ['obj', 'a', 'b', 'place', 'hour'], ['a', 'b']); def('obj.y.topic', 'narr', 2, ['obj', 'first', 'item'], ['first', 'item']);
     def('obj.y.sched', 'narr', 2, ['obj', 'name', 'part'], ['name', 'part']); def('obj.y.char', 'narr', 2, ['obj', 'name', 'role', 'trait'], ['name', 'trait']);
     def('xt.answer', 'speech', 2, ALL_VARS); def('tone.good', 'narr', 2, ALL_VARS); def('tone.bad', 'narr', 2, ALL_VARS);
-    // v0.9.0: twists
+    // v0.9.0 / v0.17.0: twists & relationship effects
     def('ev.twist.planted.title', 'one', 1, ['first']); def('ev.twist.planted.item', 'one', 1); def('ev.twist.planted.text', 'narr', 2, ['obj', 'a', 'initial'], ['a', 'initial']);
     def('ev.twist.accomplice.title', 'one', 1, ['cfirst']); def('ev.twist.accomplice.text', 'narr', 2, ['obj', 'place', 'hour', 'comp', 'c'], ['comp', 'c']);
+    def('ev.twist.double.title', 'one', 1, ['loc']); def('ev.twist.double.item', 'one', 1); def('ev.twist.double.text', 'narr', 2, ['obj', 'loc', 'crimeloc', 'hour', 'initial'], ['loc', 'initial']);
+    def('ev.twist.victimLie.title', 'one', 1, ['v']); def('ev.twist.victimLie.item', 'one', 1); def('ev.twist.victimLie.text', 'narr', 2, ['obj', 'v', 'initial', 'loc'], ['v', 'initial']);
     def('crowd.twist.zondebok', 'speech', 2, ['first'], ['first']); def('crowd.twist.medeplichtige', 'speech', 2, ['comp', 'c'], ['comp', 'c']);
-    def('end.twist.zondebok', 'narr', 1, ALL_VARS.concat(['a']), ['a']); def('end.twist.medeplichtige', 'narr', 1, ALL_VARS.concat(['comp']), ['comp']); def('crowd.sched', 'speech', 2, BASE.concat(['name', 'part']), ['name', 'part']);
+    def('crowd.twist.dubbel', 'speech', 2, ['loc'], ['loc']); def('crowd.twist.slachtofferliegt', 'speech', 2, ['v'], ['v']);
+    def('end.twist.zondebok', 'narr', 1, ALL_VARS.concat(['a']), ['a']); def('end.twist.medeplichtige', 'narr', 1, ALL_VARS.concat(['comp']), ['comp']);
+    def('end.twist.dubbel', 'narr', 1, ALL_VARS.concat(['loc']), ['loc']); def('end.twist.slachtofferliegt', 'narr', 1, ALL_VARS, ['victim']);
+    def('rel.reconcile', 'speech', 3, ALL_VARS);
+    def('rel.warmTip.sched', 'speech', 3, ALL_VARS.concat(['target', 'part', 'place']), ['target', 'part', 'place']);
+    def('rel.warmTip.loc', 'speech', 3, ALL_VARS.concat(['place']), ['place']);
+    def('rel.hostileSpread', 'narr', 2, ALL_VARS.concat(['other', 'loc']), ['other']);
+    def('crowd.sched', 'speech', 2, BASE.concat(['name', 'part']), ['name', 'part']);
     Object.keys(TPL_OBJECTS).forEach((t) => def('obj.nothing.' + t, 'narr', 4, BASE, [], true));
     def('drink', 'label', 2, [], [], true);
     def('treat.narr', 'narr', 2, ALL_VARS.concat(['drink']), ['drink']); def('treat.ok', 'speech', 3, ALL_VARS.concat(['drink']), [], true); def('treat.hostile', 'raw', 2, ALL_VARS);
@@ -656,8 +665,8 @@ const CaseGen = {
     if (gossip && rng.next() < 0.6) mk({ key: 'red_gossip', route: 'red', title: one('ev.red.gossip.title', { first: U.first(suspA) }), slot: 'motive', pointsTo: suspA.id, requires: [e1.id], item: null,
       source: { type: 'talk', npcId: gossip.id, topic: 'Wat er wordt gefluisterd' }, text: Text.q(tx('ev.red.gossip.text', { a: suspA.name, v: V })) });
 
-    // --- v0.9.0 (voorstel 7): one twist per case, from the plot DNA ---
-    let twist = TWIST_GAME[dna.ids.twists] || 'geen';
+    // --- v0.9.0 / v0.17.0: one twist per case, from the plot DNA (zondebok, medeplichtige, dubbel, slachtofferliegt, geen) ---
+    let twist = TWIST_GAME[dna.ids.twists] || 'geen', twistLocId = null;
     if (dna.ids.twists === 'manipulatie' && RNG.make(seed + '|twist').next() < 0.5) twist = 'medeplichtige';   // a manipulating confidant may also buy a false alibi
     if (twist === 'medeplichtige') {
       const o = objAt(otherLoc);
@@ -670,6 +679,20 @@ const CaseGen = {
       const ol = real.find((l) => l.id === src.locationId), on = ol.objects.find((x) => x.id === src.objectId).name;
       mk({ key: 'twist_planted', route: 'red', title: one('ev.twist.planted.title', { first: U.first(suspA) }), slot: 'method', pointsTo: suspA.id, requires: [e1.id], item: one('ev.twist.planted.item'),
         source: src, text: tx('ev.twist.planted.text', { obj: on, a: suspA.name, initial: C.charAt(0) }) });
+    }
+    if (twist === 'dubbel') {
+      const src = place(['werkplaats', 'kantoor', 'haven', 'archief', 'herberg', 'markt'], [crimeLoc.id, victimLoc.id]);
+      const ol = real.find((l) => l.id === src.locationId), on = ol.objects.find((x) => x.id === src.objectId).name;
+      twistLocId = ol.id;
+      mk({ key: 'twist_double', route: 'paper', title: one('ev.twist.double.title', { loc: ol.name }), slot: 'method', pointsTo: culprit.id, requires: [e2.id], item: one('ev.twist.double.item'),
+        source: src, text: tx('ev.twist.double.text', { obj: on, loc: ol.name, crimeloc: crimeLoc.name, hour: CRIME_HOUR, initial: C.charAt(0) }) });
+    }
+    if (twist === 'slachtofferliegt') {
+      const src = place(['archief', 'kantoor', 'herberg', 'huis', 'werkplaats'], [victimLoc.id]);
+      const ol = real.find((l) => l.id === src.locationId), on = ol.objects.find((x) => x.id === src.objectId).name;
+      twistLocId = ol.id;
+      mk({ key: 'twist_victim_lie', route: 'paper', title: one('ev.twist.victimLie.title', { v: V }), slot: 'motive', pointsTo: culprit.id, requires: [e2.id], item: one('ev.twist.victimLie.item'),
+        source: src, text: tx('ev.twist.victimLie.text', { obj: on, v: V, initial: C.charAt(0), loc: ol.name }) });
     }
 
     const contradictions = [
@@ -724,6 +747,8 @@ const CaseGen = {
     crowd[1 % crowd.length].barks.push(Text.q(tx('crowd.guidePapers', { loc: victimLoc.name, victim: V })));
     if (twist === 'zondebok') crowd[2 % crowd.length].barks.push(Text.q(tx('crowd.twist.zondebok', { first: U.first(suspA) })));
     if (twist === 'medeplichtige') crowd[2 % crowd.length].barks.push(Text.q(tx('crowd.twist.medeplichtige', { comp: U.first(companion), c: U.first(culprit) })));
+    if (twist === 'dubbel' && twistLocId) crowd[2 % crowd.length].barks.push(Text.q(tx('crowd.twist.dubbel', { loc: locName(twistLocId) })));
+    if (twist === 'slachtofferliegt') crowd[2 % crowd.length].barks.push(Text.q(tx('crowd.twist.slachtofferliegt', { v: V })));
 
     const start = real.find((l) => l.template === 'herberg') || real[0];
     const clockDef = Lib.get('clocks', dna.ids.clocks);
@@ -739,7 +764,7 @@ const CaseGen = {
       protagonist: (() => { const p = Object.assign({}, bible.protagonist); delete p.surname; return p; })(),
       world: { city: { id: 'city_main', name: city.name, culture: city.culture.replace(/ \(.*\)$/, ''), customs: city.customs, economy: city.economy }, locations: locations },
       crime: crime,
-      truth: { twist: twist, culpritId: culprit.id, close: !!t.truth.culprit.closeToProtagonist, motive: Lib.get('motives', dna.ids.motives).nl, method: Lib.get('methods', dna.ids.methods).nl,
+      truth: { twist: twist, twistLocId: twistLocId, culpritId: culprit.id, close: !!t.truth.culprit.closeToProtagonist, motive: Lib.get('motives', dna.ids.motives).nl, method: Lib.get('methods', dna.ids.methods).nl,
         motiveId: dna.ids.motives, methodId: dna.ids.methods, roleLabel: t.truth.culprit.relationToProtagonist, timeline: t.truth.timeline, trueEnding: t.truth.trueEnding,
         roles: { suspA: suspA.id, suspB: suspB.id, witness: witness.id, confidant: confidant.id, companion: companion.id, gossip: gossip ? gossip.id : null }, crimeHour: CRIME_HOUR, otherLocationId: otherLoc.id },
       cast: core, crowd: crowd, evidence: ev, contradictions: contradictions, relations: relations, alibis: alibis
@@ -1041,7 +1066,8 @@ const Schedule = {
 
 const Dialogue = {
   topics(s, npc) {
-    const p = s.play, cleared = !!p.cleared[npc.id], out = [{ id: 'talk', label: 'Praat even' }], used = Dialogue.used(s, npc.id);
+    const p = s.play, cleared = !!p.cleared[npc.id], tone = Rels.toneOf(s, npc.id), out = [{ id: 'talk', label: 'Praat even' }], used = Dialogue.used(s, npc.id);
+    if (tone === 'cold' || tone === 'hostile') out.unshift({ id: 'verzoen', label: 'Rustig herbeginnen' });
     if (!cleared) out.push({ id: 'crime', label: 'Over de zaak' });
     if (!cleared && !p.asked[npc.id + ':alibi']) out.push({ id: 'alibi', label: 'Waar was je die avond?' });
     s.evidence.forEach((e) => { if (e.source.type === 'talk' && e.source.npcId === npc.id && !p.found[e.id] && Evidence.reqMet(s, e)) out.push({ id: 'ev:' + e.id, label: e.source.topic }); });
@@ -1064,7 +1090,27 @@ const Dialogue = {
     const p = s.play, used = Dialogue.used(s, npc.id);
     return s.contradictions.filter((c) => c.npcId === npc.id && p.heard[c.id] && p.found[c.counterEvidence] && !p.resolved[c.id] && used.indexOf('con:' + c.id) < 0);
   },
-  canTreat: (s, npc) => !!(s.visit && s.visit.conv === npc.id && World.here(s).template === 'herberg' && s.player.money >= TREAT_COST && Dialogue.used(s, npc.id).indexOf('treat') < 0),
+  // v0.17.0: warm rapport halves treat cost at the inn (1 instead of 2)
+  treatCost: (s, npc) => npc && Rels.toneOf(s, npc.id) === 'warm' ? 1 : TREAT_COST,
+  canTreat: (s, npc) => !!(s.visit && s.visit.conv === npc.id && World.here(s).template === 'herberg' && s.player.money >= Dialogue.treatCost(s, npc) && Dialogue.used(s, npc.id).indexOf('treat') < 0),
+  // v0.17.0: warm/high-trust NPC voluntarily shares a schedule tip once per game (deterministic, name-ordered, 100% leak-free)
+  giveWarmTip(s, npc) {
+    const p = s.play; p.warmTip = p.warmTip || {};
+    if (p.warmTip[npc.id]) return false;
+    const tone = Rels.toneOf(s, npc.id), rel = s.relations[npc.id];
+    if (tone !== 'warm' && (!rel || rel.trust < 65)) return false;
+    const others = s.cast.filter((x) => x.id !== npc.id).sort(byNameE);
+    const r = RNG.make(s.seed + '|wt|' + npc.id);
+    const target = others.find((x) => !Mentions.schedOf(s, x.id).length) || (others.length ? r.pick(others) : null);
+    if (!target) return false;
+    const part = r.int(DAY.parts), locId = Schedule.at(s, target.id, s.clock.day, part), loc = World.loc(s, locId);
+    if (!loc) return false;
+    p.warmTip[npc.id] = { target: target.id, part: part, locId: locId };
+    Mentions.addSched(s, target.id, part, locId, U.first(npc));
+    Log.npc(s, npc, Text.speak(s, npc, 'rel.warmTip.sched', Text.npcVars(s, npc, { target: target.name, part: PARTS[part], place: loc.name })), tone);
+    Log.sys(s, 'Omdat ' + U.first(npc) + ' je vertrouwt, krijg je een roostertip over ' + U.first(target) + '.');
+    return true;
+  },
   crimeLine(s, npc, approach) {
     const T = s.truth, A = World.npc(s, T.roles.suspA), v = Text.npcVars(s, npc, { suspA: A.name });
     if (npc.id === T.culpritId) {
@@ -1153,6 +1199,7 @@ const Dialogue = {
       }
     };
     if (ASK[topicId]) return Text.q(r.pick(ASK[topicId][approach] || ASK[topicId].reserved)[je]);
+    if (topicId === 'verzoen') return Text.q(['Ik ben misschien te scherp begonnen, ' + first + '. Laten we dit rustig en eerlijk oppakken.', 'Ik ben misschien wat kortaf begonnen, ' + first + '. Laten we het even rustig overdoen.'][je]);
     if (topicId === 'xt') return Text.q(['Dit vond ik, ' + first + '. Het is van u, geloof ik.', 'Dit vond ik, ' + first + '. Het is van jou, toch?'][je]);
     if (topicId.indexOf('chk:') === 0) {
       const x = World.npc(s, topicId.slice(4)), a = s.alibis[x.id], place = World.loc(s, a.locId).name, xf = U.first(x);
@@ -1433,7 +1480,21 @@ const Act = {
     this._tick(s, kind); s.turn++; return true;
   },
   // ends the current conversation; that person is done for this visit. A place that closed meanwhile shows you out.
-  talkEnd(s) { if (!s.visit || !s.visit.conv) return; s.visit.done[s.visit.conv] = true; s.visit.conv = null; if (s.visit.closing) Clock.shut(s); },
+  talkEnd(s) {
+    if (!s.visit || !s.visit.conv) return;
+    const npcId = s.visit.conv, npc = World.npc(s, npcId);
+    // v0.17.0: leaving a hostile NPC causes a mild suspicion ripple to one bystander at the same location (once per NPC, leak-free)
+    if (npc && Rels.toneOf(s, npcId) === 'hostile' && !(s.play.hostileSpread && s.play.hostileSpread[npcId])) {
+      const other = World.present(s).filter((x) => x.id !== npcId).sort(byNameE)[0];
+      if (other) {
+        (s.play.hostileSpread = s.play.hostileSpread || {})[npcId] = other.id;
+        Rels.apply(s, other.id, { suspicion: 4 });
+        Log.narr(s, Text.say(s, 'rel.hostileSpread', Text.npcVars(s, npc, { other: other.name, loc: World.here(s).name }), 'hspread|' + npcId));
+      }
+    }
+    s.visit.done[npcId] = true; s.visit.conv = null;
+    if (s.visit.closing) Clock.shut(s);
+  },
   _use(s, npcId, key) { (s.visit.used[npcId] = s.visit.used[npcId] || []).push(key); },
   _inConv: (s, npcId) => !s.play.ended && !!s.visit && s.visit.conv === npcId,   // v0.12.0: a talk lasts, even when the hour turns
   topic(s, npcId, topicId, approach) {
@@ -1443,16 +1504,26 @@ const Act = {
     if (!Dialogue.topics(s, npc).some((t) => t.id === topicId)) return;   // engine validates every choice
     this._use(s, npcId, topicId);
     Log.ask(s, npc, Dialogue.questionLine(s, npc, topicId, approach), approach);
+    // v0.17.0: reconciliation topic calms cold/hostile relations without soft-locking a case
+    if (topicId === 'verzoen') {
+      Rels.apply(s, npcId, { resentment: -8, suspicion: -6, trust: 6, affection: 2 });
+      const tone2 = Rels.toneOf(s, npcId), v2 = Text.npcVars(s, npc);
+      Log.npc(s, npc, Text.speak(s, npc, 'rel.reconcile', v2), tone2);
+      Log.sys(s, 'De lucht met ' + U.first(npc) + ' klaart merkbaar op.');
+      this._done(s); return;
+    }
     const fit = Dialogue.fit(npc, approach);
     Rels.apply(s, npcId, fit[1]);
     if (fit[0] === 'good') s.play.warmTalks[npcId] = (s.play.warmTalks[npcId] || 0) + 1;   // v0.9.0: counts talks in the right tone
     const cueKey = 'cue|' + npcId + '|' + approach;
     if (fit[0] !== 'ok' && s.visit && !(s.visit.used[npcId] || []).some((k) => k === cueKey)) { this._use(s, npcId, cueKey); Log.narr(s, Text.say(s, fit[0] === 'good' ? 'tone.good' : 'tone.bad', Text.npcVars(s, npc), 'cue|' + npcId)); }
     const tone = Rels.toneOf(s, npcId), v = Text.npcVars(s, npc), evade = (t) => Text.speak(s, npc, t === 'hostile' ? 'evade.hostile' : 'evade.cold', v);
-    if (topicId === 'talk') Log.npc(s, npc, Text.speak(s, npc, 'talk.' + tone + '.' + (TEMPER[npc.personality] || 'peinzend'), v), tone);
-    else if (topicId === 'crime') {
+    if (topicId === 'talk') {
+      Log.npc(s, npc, Text.speak(s, npc, 'talk.' + tone + '.' + (TEMPER[npc.personality] || 'peinzend'), v), tone);
+      Dialogue.giveWarmTip(s, npc);
+    } else if (topicId === 'crime') {
       if (tone === 'hostile') Log.npc(s, npc, evade(tone), tone);
-      else { const l = Dialogue.crimeLine(s, npc, approach); Log.npc(s, npc, l.text, tone); if (l.hint && Level.get(s).hint) Log.sys(s, 'Iets in die reactie klopt niet. Je onthoudt het.'); }
+      else { const l = Dialogue.crimeLine(s, npc, approach); Log.npc(s, npc, l.text, tone); if (l.hint && Level.get(s).hint) Log.sys(s, 'Iets in die reactie klopt niet. Je onthoudt het.'); Dialogue.giveWarmTip(s, npc); }
     } else if (topicId === 'alibi') {
       s.play.asked[npcId + ':alibi'] = true;
       if (tone === 'hostile') Log.npc(s, npc, Text.say(s, 'alibi.hostileLead', v, 'lead|' + npc.id) + ' ' + Dialogue.alibiLine(s, npc), tone);
@@ -1548,7 +1619,9 @@ const Act = {
   treat(s, npcId) {
     const npc = World.npc(s, npcId); if (!npc || !this._inConv(s, npcId) || !Dialogue.canTreat(s, npc)) return;
     this._use(s, npcId, 'treat');
-    s.player.money -= TREAT_COST; Rels.apply(s, npcId, { affection: 4, trust: 2, resentment: -2 });
+    const warm = Rels.toneOf(s, npcId) === 'warm';
+    s.player.money -= Dialogue.treatCost(s, npc);
+    Rels.apply(s, npcId, warm ? { affection: 6, trust: 4, resentment: -4 } : { affection: 4, trust: 2, resentment: -2 });
     const drink = Text.say(s, 'drink', {}, 'drink', { limit: 99 }), v = Text.npcVars(s, npc, { drink: drink });
     Log.narr(s, Text.say(s, 'treat.narr', v, 'treat'));
     Log.npc(s, npc, Rels.toneOf(s, npcId) === 'hostile' ? Text.say(s, 'treat.hostile', v, 'treath') : Text.speak(s, npc, 'treat.ok', v), Rels.toneOf(s, npcId));
@@ -1630,6 +1703,8 @@ const Accuse = {
     lines.push(Text.say(s, T.close ? 'end.close' : 'end.distant', v, 'end2'));
     if (T.twist === 'zondebok') lines.push(Text.say(s, 'end.twist.zondebok', Object.assign({}, v, { a: World.npc(s, T.roles.suspA).name }), 'endtw'));
     if (T.twist === 'medeplichtige') lines.push(Text.say(s, 'end.twist.medeplichtige', Object.assign({}, v, { comp: World.npc(s, T.roles.companion).name }), 'endtw'));
+    if (T.twist === 'dubbel' && T.twistLocId) lines.push(Text.say(s, 'end.twist.dubbel', Object.assign({}, v, { loc: World.loc(s, T.twistLocId).name }), 'endtw'));
+    if (T.twist === 'slachtofferliegt') lines.push(Text.say(s, 'end.twist.slachtofferliegt', v, 'endtw'));
     const q = (s.clock.day <= 3 ? 2 : s.clock.day <= DAY.soft ? 1 : 0) + (s.play.wrongAccusations === 0 ? 1 : 0) + (found >= total - 2 ? 1 : 0);
     lines.push(Text.say(s, 'end.quality.' + Math.min(q, 3), {}, 'endq'));
     const epi = s.cast.filter((n) => n.id !== c.id).map((n) => {
@@ -1716,6 +1791,264 @@ const Solver = {
       else min = Clock.partEnd(part);
     }
     return { ok: done(), parts: elapsed() + (done() ? 1 : 0), visits: path.length, path: path };
+  }
+};
+
+/* ---------------- SimPlayer (v0.17.0): non-omniscient detective simulator ----------------
+   Plays exclusively through public UI state and Act.* actions. NEVER reads s.truth.culpritId, s.truth.roles,
+   unasked alibis, unfound evidence, or private NPC fields (secrets, trueAlignment, agenda).
+   Measures realistic clock balance (days, day parts, visits, win rate) across seeds and difficulty levels. */
+const SimPlayer = {
+  _hasWord(txt, word) {
+    if (!txt || !word) return false;
+    return new RegExp('(^|[^\\wÀ-ÿ])' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^\\wÀ-ÿ])', 'i').test(txt);
+  },
+  _extractInitials(txt) {
+    const out = new Set();
+    const m1 = txt.match(/(?:beginletter|omcirkeld|paraaf|letter|initialen?|monogram|kras|stempel)[^A-Z\n]{0,22}\b([A-Z])(?:\.|[^A-Za-zÀ-ÿ]|$)/gi) || [];
+    m1.forEach((x) => { const c = x.match(/([A-Z])(?:\.|[^A-Za-zÀ-ÿ]|$)$/); if (c) out.add(c[1]); });
+    const m2 = txt.match(/['"‘’]([A-Z])\.?['"‘’]/g) || [];
+    m2.forEach((x) => { const c = x.match(/([A-Z])/); if (c) out.add(c[1]); });
+    const m3 = txt.match(/:\s*([A-Z])(?:\.|[\s,;"”]|$)/g) || [];
+    m3.forEach((x) => { const c = x.match(/([A-Z])/); if (c) out.add(c[1]); });
+    return Array.from(out);
+  },
+  _extractKenmerk(txt) {
+    const low = (txt || '').toLowerCase();
+    return Object.keys(KENMERK).find((k) => {
+      const lbl = KENMERK[k].label.toLowerCase(), desc = KENMERK[k].desc.toLowerCase();
+      return low.indexOf(lbl) >= 0 || low.indexOf(desc) >= 0;
+    }) || null;
+  },
+  _deduce(s, triedAccuse) {
+    const p = s.play, found = Evidence.found(s).filter((e) => !p.debunked[e.id] && e.route !== 'start');
+    const met = s.cast.filter((n) => p.met[n.id]).sort(byNameE);
+    const motives = found.filter((e) => e.slot === 'motive'), methods = found.filter((e) => e.slot === 'method');
+    if (!met.length || !motives.length || !methods.length) return null;
+
+    // Gather public clue filters (kenmerk & initials) from all non-debunked discovered cards
+    const clueKenmerks = new Set(), clueInitials = new Set();
+    found.forEach((e) => {
+      const km = this._extractKenmerk(e.text + ' ' + e.title);
+      if (km) clueKenmerks.add(km);
+      this._extractInitials(e.text).forEach((ch) => clueInitials.add(ch));
+    });
+
+    const isCleared = (n) => !!(p.cleared[n.id] || (p.alibiCheck[n.id] && p.alibiCheck[n.id].ok === true));
+    const isBroken = (n) => !!(p.alibiCheck[n.id] && p.alibiCheck[n.id].ok === false);
+    const confMethodOf = (n) => methods.find((e) => e.source.type === 'confront' && s.contradictions.some((c) => c.id === e.source.conId && c.npcId === n.id && p.resolved[c.id]));
+
+    const cands = [];
+    met.forEach((n) => {
+      if (isCleared(n)) return;
+      const ini = n.name.charAt(0).toUpperCase(), first = U.first(n);
+      const broken = isBroken(n), confMet = confMethodOf(n);
+      const kmMatch = clueKenmerks.size ? clueKenmerks.has(n.kenmerk) : false;
+      const iniMatch = clueInitials.size ? clueInitials.has(ini) : false;
+
+      // Match motive cards publicly (by full/first name or initial)
+      const motScored = motives.map((e) => {
+        const byNameHit = this._hasWord(e.text, n.name) || this._hasWord(e.text, first);
+        const byIniHit = this._extractInitials(e.text).indexOf(ini) >= 0;
+        return { e: e, sc: (byNameHit ? 5 : 0) + (byIniHit ? 3 : 0) };
+      }).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc || (a.e.id < b.e.id ? -1 : 1));
+
+      // Match method cards publicly (confrontation yield > name > initial > kenmerk)
+      const metScored = methods.map((e) => {
+        const isConf = confMet && confMet.id === e.id;
+        const byNameHit = this._hasWord(e.text, n.name) || this._hasWord(e.text, first);
+        const byIniHit = this._extractInitials(e.text).indexOf(ini) >= 0;
+        const byKmHit = this._extractKenmerk(e.text) === n.kenmerk;
+        return { e: e, sc: (isConf ? 8 : 0) + (byNameHit ? 5 : 0) + (byIniHit ? 3 : 0) + (byKmHit ? 2 : 0) };
+      }).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc || (a.e.id < b.e.id ? -1 : 1));
+
+      if (!motScored.length || !metScored.length) return;
+      const bestMot = motScored[0], bestMet = metScored[0];
+      const key = n.id + '|' + bestMot.e.id + '|' + bestMet.e.id;
+      if (triedAccuse.has(key)) return;
+
+      let score = bestMot.sc + bestMet.sc;
+      if (broken) score += 8;
+      if (confMet) score += 8;
+      if (kmMatch) score += 4;
+      if (iniMatch) score += 4;
+      // Penalize if kenmerk/initials were discovered and this person does NOT match them
+      if (clueKenmerks.size && !kmMatch) score -= 5;
+      if (clueInitials.size && !iniMatch) score -= 4;
+      cands.push({ n: n, mot: bestMot.e, met: bestMet.e, score: score, strong: !!(broken || confMet || (kmMatch && iniMatch && bestMot.sc >= 5)), key: key });
+    });
+
+    if (!cands.length) return null;
+    cands.sort((a, b) => b.score - a.score || (a.n.id < b.n.id ? -1 : 1));
+    const top = cands[0], second = cands[1];
+    // Accuse when we have a clear lead or strong proof (broken alibi / confrontation / unique kenmerk+initial+motive)
+    if (top.strong && (!second || top.score >= second.score + 4)) return top;
+    if (cands.length === 1 && top.score >= 12) return top;
+    return null;
+  },
+  run(s0, opt) {
+    const maxDays = (opt && opt.maxDays) || 6;
+    const s = U.clone(s0), p = s.play;
+    const mem = { badTones: {}, goodTone: {}, triedEarlyAt: {}, talkedAt: {}, triedAccuse: new Set() };
+    const foundN = () => Object.keys(p.found).length;
+    const heardN = () => Object.keys(p.heard).length;
+    const progN = () => foundN() + heardN();
+    const pickApproach = (npc) => {
+      if (Level.get(s).toneHint) return Dialogue.best(npc);
+      if (mem.goodTone[npc.id]) return mem.goodTone[npc.id];
+      const bad = mem.badTones[npc.id] || {};
+      return ['reserved', 'warm', 'sharp'].find((a) => !bad[a]) || 'reserved';
+    };
+    const conductTalk = (npc) => {
+      let guard = 0;
+      while (s.visit && s.visit.conv === npc.id && !s.play.ended && guard++ < 18) {
+        const topics = Dialogue.topics(s, npc);
+        if (topics.some((t) => t.id === 'verzoen')) { Act.topic(s, npc.id, 'verzoen', 'reserved'); continue; }
+        const cons = Dialogue.confronts(s, npc);
+        if (cons.length) { Act.confront(s, cons[0].id); continue; }
+        if (Dialogue.canTreat(s, npc) && ['cold', 'hostile'].indexOf(Rels.toneOf(s, npc.id)) >= 0) { Act.treat(s, npc.id); continue; }
+        const prio = (t) => t.id === 'xt' ? 10 : t.id.indexOf('ev:') === 0 ? 9 : t.id.indexOf('chk:') === 0 ? 8 : t.id === 'alibi' ? 7 : t.id === 'crime' ? 5 : t.id === 'talk' ? 2 : 1;
+        const pick = topics.slice().sort((a, b) => prio(b) - prio(a))[0];
+        if (!pick) break;
+        if (pick.id === 'talk' && mem.goodTone[npc.id] && Rels.toneOf(s, npc.id) !== 'cold' && Rels.toneOf(s, npc.id) !== 'hostile') break;
+        const app = pickApproach(npc), rBefore = Object.assign({}, s.relations[npc.id]);
+        Act.topic(s, npc.id, pick.id, app);
+        const rAfter = s.relations[npc.id];
+        if (rAfter.trust > rBefore.trust && rAfter.resentment <= rBefore.resentment) mem.goodTone[npc.id] = app;
+        else if (rAfter.resentment > rBefore.resentment || rAfter.trust < rBefore.trust) (mem.badTones[npc.id] = mem.badTones[npc.id] || {})[app] = true;
+      }
+      if (s.visit && s.visit.conv === npc.id) Act.talkEnd(s);
+      mem.talkedAt[npc.id] = { foundN: foundN(), progN: progN() };
+    };
+    const pendingCheckTargets = () => {
+      const set = new Set();
+      s.cast.forEach((n) => {
+        if (p.asked[n.id + ':alibi'] && !(p.alibiCheck && p.alibiCheck[n.id])) {
+          const a = s.alibis && s.alibis[n.id];
+          if (a && a.withId) set.add(a.withId);
+        }
+      });
+      return set;
+    };
+    const npcNeedsTalk = (n, chkSet) => {
+      if (!p.met[n.id]) return false;
+      if (chkSet.has(n.id)) return true;
+      if (p.xt && p.xt[n.id] && !(p.xtDone && p.xtDone[n.id])) return true;
+      if (!p.asked[n.id + ':alibi'] && !p.cleared[n.id]) return true;
+      const last = mem.talkedAt[n.id];
+      if (!last) return true;
+      if (foundN() > last.foundN) {
+        const hasOpenClaim = s.contradictions.some((c) => c.npcId === n.id && p.heard[c.id] && !p.resolved[c.id]);
+        if (hasOpenClaim || !p.cleared[n.id]) return true;
+      }
+      return false;
+    };
+    const objActionable = (o) => {
+      if (p.examined && p.examined[o.id]) return false;
+      if (s.evidence.some((e) => e.source.objectId === o.id && p.found[e.id])) return false;
+      if (mem.triedEarlyAt[o.id] != null) return mem.triedEarlyAt[o.id] < progN();
+      return true;
+    };
+    const locObjCount = (l) => l.objects.filter(objActionable).length;
+    const scoreLoc = (l, part, chkSet) => {
+      const T = Travel.check(s, l.id);
+      if (!T.open || T.late) return -1;
+      const timeLeft = Clock.partEnd(T.part) - T.at;
+      if (timeLeft < Level.cost(s, 'examine')) return -1;
+      const hereAll = s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, s.clock.day, T.part) === l.id);
+      const unmetN = hereAll.filter((x) => !People.known(s, x.id)).length;
+      const metCore = s.cast.filter((x) => p.met[x.id] && Schedule.at(s, x.id, s.clock.day, T.part) === l.id);
+      let sc = 0;
+      const objs = locObjCount(l);
+      if (objs > 0) sc += 12 + Math.min(objs, 4) * 2 + (l.id === s.crime.crimeLocationId || l.id === s.crime.victimLocationId ? 5 : 0);
+      if (unmetN > 0) sc += Math.min(unmetN, 3) * 8;
+      metCore.forEach((n) => {
+        if (chkSet.has(n.id)) sc += 18;
+        if (s.contradictions.some((c) => c.npcId === n.id && p.heard[c.id] && !p.resolved[c.id]) && (!mem.talkedAt[n.id] || foundN() > mem.talkedAt[n.id].foundN)) sc += 22;
+        else if (!p.asked[n.id + ':alibi'] && !p.cleared[n.id]) sc += 14;
+        else if (npcNeedsTalk(n, chkSet)) sc += 9;
+      });
+      return sc > 0 ? sc - T.walk / 20 : 0;
+    };
+
+    let steps = 0;
+    while (!p.ended && s.clock.day <= maxDays && steps++ < 400) {
+      const pick = this._deduce(s, mem.triedAccuse);
+      if (pick) {
+        if (s.visit) Act.leave(s);
+        mem.triedAccuse.add(pick.key);
+        Act.setDossier(s, 'suspectId', pick.n.id);
+        Act.setDossier(s, 'motiveEvidenceId', pick.mot.id);
+        Act.setDossier(s, 'methodEvidenceId', pick.met.id);
+        Act.accuse(s);
+        if (p.ended) break;
+        continue;
+      }
+      if (s.clock.part >= DAY.parts) { Act.endDay(s); continue; }
+      const chkSet = pendingCheckTargets();
+      const ranked = s.world.locations.map((l) => ({ l: l, sc: scoreLoc(l, s.clock.part, chkSet) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc || (a.l.id < b.l.id ? -1 : 1));
+      if (!ranked.length) { Act.wait(s); continue; }
+      const targetLoc = ranked[0].l;
+      if (!Act.visit(s, targetLoc.id)) { Act.wait(s); continue; }
+
+      let vGuard = 0;
+      while (s.visit && !p.ended && vGuard++ < 30) {
+        const loc = World.here(s), rest = Clock.left(s), chkNow = pendingCheckTargets();
+        const talkCand = World.present(s).filter((n) => !s.visit.done[n.id] && npcNeedsTalk(n, chkNow)).sort(byNameE)[0];
+        if (talkCand && rest >= Level.cost(s, 'talk')) {
+          if (Act.talkStart(s, talkCand.id)) { conductTalk(talkCand); continue; }
+        }
+        const objCand = loc.objects.find(objActionable);
+        if (objCand && rest >= Level.cost(s, 'examine')) {
+          const pnBefore = progN();
+          Act.examine(s, objCand.id);
+          // If object wasn't marked fully examined and yielded no evidence yet, remember it as early/retryable
+          if (!(p.examined && p.examined[objCand.id]) && !s.evidence.some((e) => e.source.objectId === objCand.id && p.found[e.id])) {
+            mem.triedEarlyAt[objCand.id] = pnBefore;
+          }
+          continue;
+        }
+        const allHere = s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, s.clock.day, s.clock.part) === loc.id && !People.known(s, x.id) && !s.visit.done[x.id]).sort((a, b) => (a.age - b.age) || (a.height - b.height) || (a.id < b.id ? -1 : 1));
+        if (allHere.length && rest >= Level.cost(s, 'greet')) {
+          const who = allHere[0];
+          if (Act.greet(s, who.id)) {
+            if (s.visit && s.visit.conv === who.id) conductTalk(who);
+            continue;
+          }
+        }
+        break;
+      }
+      if (s.visit) Act.leave(s);
+    }
+    return {
+      ok: !!(p.ended && p.ended.correct),
+      day: s.clock.day,
+      parts: Clock.elapsed(s.clock) + (p.ended ? 1 : 0),
+      visits: p.visits || 0,
+      wrong: p.wrongAccusations || 0,
+      found: foundN(),
+      total: s.evidence.length,
+      seed: s.seed,
+      level: Level.id(s)
+    };
+  },
+  bench(nSeeds, level) {
+    nSeeds = nSeeds || 30; level = level || 'normaal';
+    const runs = [];
+    for (let i = 0; i < nSeeds; i++) runs.push(this.run(Game.create('sim-' + i, level)));
+    const won = runs.filter((r) => r.ok);
+    const avg = (arr, fn) => arr.length ? arr.reduce((a, x) => a + fn(x), 0) / arr.length : 0;
+    return {
+      level: level, n: nSeeds, won: won.length,
+      winRate: +(100 * won.length / nSeeds).toFixed(1),
+      avgDays: +avg(won, (r) => r.day).toFixed(2),
+      avgParts: +avg(won, (r) => r.parts).toFixed(2),
+      avgVisits: +avg(won, (r) => r.visits).toFixed(1),
+      avgWrong: +avg(runs, (r) => r.wrong).toFixed(2),
+      withinSoft: won.filter((r) => r.day <= DAY.soft).length,
+      maxDay: won.length ? Math.max.apply(null, won.map((r) => r.day)) : 0,
+      failed: runs.filter((r) => !r.ok).map((r) => r.seed)
+    };
   }
 };
 
@@ -1836,7 +2169,7 @@ const Game = {
       visit: null,
       meta: w.meta, protagonist: w.protagonist, world: w.world, crime: w.crime, truth: w.truth,
       cast: w.cast, crowd: w.crowd, schedule: null, evidence: w.evidence, contradictions: w.contradictions, relations: w.relations, alibis: w.alibis,
-      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, knownSched: {}, wrongAccusations: 0, visits: 0, ended: null },
+      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, knownSched: {}, warmTip: {}, hostileSpread: {}, wrongAccusations: 0, visits: 0, ended: null },
       ui: {},
       log: []
     };
@@ -1879,7 +2212,7 @@ const Game = {
     if (sameK.length !== 2 || sameK.indexOf(A.id) < 0) e.push('kenmerk van de dader niet precies gedeeld met verdachte A');
     if (s.cast.some((x) => !KENMERK[x.kenmerk])) e.push('persoon zonder kenmerk');
     const first = C.name.slice(0, C.name.indexOf(' ')), re = new RegExp('(^|[^\\wÀ-ÿ])' + first + '($|[^\\wÀ-ÿ])');
-    s.evidence.filter((x) => ['paper_ctx', 'paper_method', 'people_witness', 'twist_planted'].indexOf(x.key) >= 0).forEach((x) => { if (re.test(x.text + ' ' + x.title)) e.push('naam van de dader in ' + x.key); });
+    s.evidence.filter((x) => ['paper_ctx', 'paper_method', 'people_witness', 'twist_planted', 'twist_double', 'twist_victim_lie'].indexOf(x.key) >= 0).forEach((x) => { if (re.test(x.text + ' ' + x.title)) e.push('naam van de dader in ' + x.key); });
     const al = s.alibis || {};
     s.cast.forEach((x) => { const a = al[x.id]; if (!a) { e.push('geen alibi: ' + x.id); return; } if (a.withId && !World.npc(s, a.withId)) e.push('alibi noemt onbekende: ' + x.id); if (a.locId === s.crime.crimeLocationId && x.id !== C.id) e.push('alibi op plaats delict: ' + x.id); });
     if (!al[C.id] || al[C.id].truth || !al[C.id].withId) e.push('alibi dader klopt niet');
@@ -1919,7 +2252,7 @@ const Save = {
     s.player.marks = s.player.marks || {}; s.player.notes = s.player.notes || {};
     Clock.norm(s); s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
     if (!s.play.heardOf || !s.play.heardOfLoc) { s.play.heardOf = s.play.heardOf || {}; s.play.heardOfLoc = s.play.heardOfLoc || {}; (s.log || []).forEach((e) => Mentions.scan(s, e)); }
-    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched'].forEach((k) => { s.play[k] = s.play[k] || {}; });
+    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread'].forEach((k) => { s.play[k] = s.play[k] || {}; });
     if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
     if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
     return s;
@@ -2127,15 +2460,17 @@ const Tests = {
       const best = Object.keys(TONE_FIT).map((m) => Object.keys(TONE_FIT[m]).find((a) => TONE_FIT[m][a][0] === 'good'));
       return { ok: new Set(best).size === 3 && Object.keys(TONE_FIT).every((m) => Object.keys(TONE_FIT[m]).some((a) => TONE_FIT[m][a][0] === 'bad')), info: best.join(', ') };
     });
-    t('Twist: elk soort komt voor, en een ondergeschoven briefje draagt de paraaf van de dader', () => {
+    t('Twist: alle 5 soorten komen voor (zondebok, medeplichtige, dubbel, slachtofferliegt, geen) met eigen bewijs', () => {
       const seen = {}; let bad = '';
-      for (let i = 0; i < 80; i++) {
+      for (let i = 0; i < 100; i++) {
         const s = Game.create('tw-' + i), T = s.truth; seen[T.twist] = (seen[T.twist] || 0) + 1;
         if (T.twist === 'zondebok') { const e = s.evidence.find((x) => x.key === 'twist_planted'), C = World.npc(s, T.culpritId);
           if (!e || e.pointsTo !== T.roles.suspA || e.text.indexOf(C.name.charAt(0)) < 0) bad = 'tw-' + i; }
         if (T.twist === 'medeplichtige' && s.evidence.find((x) => x.key === 'people_denial').source.type !== 'object') bad = 'tw-' + i;
+        if (T.twist === 'dubbel') { const e = s.evidence.find((x) => x.key === 'twist_double'); if (!e || e.slot !== 'method' || !T.twistLocId || T.twistLocId === s.crime.crimeLocationId) bad = 'tw-' + i; }
+        if (T.twist === 'slachtofferliegt') { const e = s.evidence.find((x) => x.key === 'twist_victim_lie'); if (!e || e.slot !== 'motive' || e.pointsTo !== T.culpritId) bad = 'tw-' + i; }
       }
-      return { ok: !bad && seen.zondebok > 3 && seen.medeplichtige > 3 && seen.geen > 3, info: JSON.stringify(seen) + (bad ? ' fout: ' + bad : '') };
+      return { ok: !bad && seen.zondebok > 3 && seen.medeplichtige > 3 && seen.dubbel > 3 && seen.slachtofferliegt > 3 && seen.geen > 3, info: JSON.stringify(seen) + (bad ? ' fout: ' + bad : '') };
     });
     t('Twist medeplichtige: de metgezel liegt, een stuk ontmaskert de leugen en de dader is weer verdachte', () => {
       for (let i = 0; i < 80; i++) {
@@ -2189,12 +2524,13 @@ const Tests = {
       });
       return { ok: !bad2.length, info: bad2.length ? bad2.slice(0, 3).join(' | ') : 'hoogste herhaling ' + worst.n + 'x' };
     });
-    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix + v0.15.0 Mentions/Hints + v0.16.0 Woodcut portraits) -----
-    t('Uiterlijk en verhoorscherm lekken de dader niet: portretten, bord, verdachtenmatrix, tableau, tempo, verhoor, mentions en hints (10 seeds)', () => {
+    // ----- views (paper and ink + v0.6.2 Interrogation + v0.14.0 Verdachtenmatrix + v0.15.0 Mentions/Hints + v0.16.0 Woodcut portraits + v0.17.0 Spoorboek) -----
+    t('Uiterlijk en verhoorscherm lekken de dader niet: portretten, bord, verdachtenmatrix, spoorboek, tableau, tempo, verhoor, mentions en hints (10 seeds)', () => {
       const b2 = [];
       for (let i = 0; i < 10; i++) {
         const s = SpikeData.make('leak-' + i, 'laat'), fam = famOf(s);
         const render = (st) => {
+          const M = MapGen.build(st);
           const base = st.cast.slice().sort(byName).map((n) => {
             const tn = Rels.toneOf(st, n.id);
             return Silhouette.svg(n, { s: st, fam: fam, mode: 'full', tone: tn })
@@ -2204,6 +2540,7 @@ const Tests = {
           }).join('')
             + Board.html(st, fam, null).html
             + Board.matrix(st, fam, null)
+            + Spoorboek.html(st, M, [])
             + Mentions.linkHtml(st, st.crime.summary + ' ' + st.cast.slice().sort(byName).map((n) => n.name).join(' '))
             + [1, 2, 3].map((tr) => JSON.stringify(Hints.get(st, tr))).join('')
             + st.world.locations.map((l) => Tableau.svg(st, l.id, 1, fam)).join('');
@@ -2695,6 +3032,97 @@ const Tests = {
       const leakFree = mkReply(false) === mkReply(true);
       return { ok: r1 && !r1.matched && min0 === min1 && hasAsk && hasNpc && hasSys && noDoublePen && leakFree,
         info: [hasAsk, hasNpc, hasSys, noDoublePen, leakFree].join(', ') };
+    });
+    // ----- v0.17.0 (fase G): interactive Spoorboek, twists dubbel/slachtofferliegt, relationship effects, SimPlayer clock balance -----
+    t('Spoorboek (v0.17.0): toont uitsluitend ontdekte staat, 100% lekvrij, herkent tegenstrijdigheid en kenmerk-verband', () => {
+      const s = Game.create('sb-g1', 'normaal'), M = MapGen.build(s);
+      const D0 = Spoorboek.build(s, M);
+      if (D0.items.length !== 0) return { ok: false, info: 'start niet leeg: ' + D0.items.length };
+      // Ask culprit alibi + check at companion -> creates alibi + denial pair
+      const C = World.npc(s, s.truth.culpritId), comp = World.npc(s, s.alibis[C.id].withId), witEv = s.evidence.find((e) => e.key === 'people_witness');
+      s.play.met[C.id] = true; s.play.asked[C.id + ':alibi'] = true;
+      s.play.alibiCheck[C.id] = { ok: false, by: comp.id };
+      s.play.found[witEv.id] = { day: 1 };
+      const D1 = Spoorboek.build(s, M);
+      const cmpClash = Spoorboek.compare(s, D1, ['al:' + C.id, 'den:' + C.id], M);
+      const cmpWit = Spoorboek.compare(s, D1, ['al:' + C.id, 'obs:' + witEv.id], M);
+      const htmlA = Spoorboek.html(s, M, ['al:' + C.id, 'den:' + C.id]);
+      const w = U.clone(s), other = w.cast.find((n) => n.id !== w.truth.culpritId);
+      w.truth.culpritId = other.id; w.cast.reverse();
+      const htmlB = Spoorboek.html(w, M, ['al:' + C.id, 'den:' + C.id]);
+      return {
+        ok: D1.items.length >= 3 && cmpClash && cmpClash.kind === 'conflict' && cmpWit && cmpWit.kind === 'clue' && htmlA === htmlB && htmlA.indexOf('sb-conflict') >= 0,
+        info: 'items=' + D1.items.length + ', clash=' + (cmpClash && cmpClash.kind) + ', wit=' + (cmpWit && cmpWit.kind) + ', lekvrij=' + (htmlA === htmlB)
+      };
+    });
+    t('Twists dubbel & slachtofferliegt (v0.17.0): eigen spoor zonder dader-naamlek, oplosbaar en passend eindverslag', () => {
+      let dblSeed = null, vlSeed = null;
+      for (let i = 0; i < 100 && (!dblSeed || !vlSeed); i++) {
+        const s = Game.create('twg-' + i);
+        if (!dblSeed && s.truth.twist === 'dubbel') dblSeed = s;
+        if (!vlSeed && s.truth.twist === 'slachtofferliegt') vlSeed = s;
+      }
+      if (!dblSeed || !vlSeed) return { ok: false, info: 'niet gevonden' };
+      const checkTw = (s, key) => {
+        const ev = s.evidence.find((e) => e.key === key);
+        const logicOk = Game.logic(s).length === 0;
+        const solved = Solver.run(s, 'paper');
+        const end = Accuse.ending(solved.state, { correct: true });
+        return !!(ev && logicOk && solved.motive && solved.method && end.text.length >= 5);
+      };
+      const okD = checkTw(dblSeed, 'twist_double'), okV = checkTw(vlSeed, 'twist_victim_lie');
+      return { ok: okD && okV, info: 'dubbel=' + okD + ' (' + dblSeed.seed + '), slachtofferliegt=' + okV + ' (' + vlSeed.seed + ')' };
+    });
+    t('Relatie-effecten (v0.17.0): verzoen kalmeert, warm geeft vriendenprijs + roostertip, hostile verspreidt argwaan (1×) en oude schema-8 save laadt', () => {
+      const s = Game.create('rel-g1', 'normaal'), inn = s.world.locations.find((l) => l.template === 'herberg') || s.world.locations[0];
+      const n = s.cast[0]; s.schedule[n.id][0][0] = inn.id; s.play.met[n.id] = true;
+      // 1. Cold -> verzoen topic appears and raises trust / lowers resentment
+      s.relations[n.id] = { trust: 20, affection: 15, resentment: 45, suspicion: 40, statusText: 'kil' };
+      Act.force(s, inn.id); Act.talkStart(s, n.id);
+      const hasVerzoen = Dialogue.topics(s, n).some((t) => t.id === 'verzoen');
+      const r0 = Object.assign({}, s.relations[n.id]);
+      Act.topic(s, n.id, 'verzoen', 'reserved');
+      const calmed = s.relations[n.id].resentment < r0.resentment && s.relations[n.id].trust > r0.trust;
+      // 2. Warm -> treatCost halves to 1 and talk triggers warmTip once (adds schedule tip)
+      s.relations[n.id] = { trust: 75, affection: 65, resentment: 5, suspicion: 5, statusText: 'warm' };
+      const warmCost = Dialogue.treatCost(s, n);
+      const money0 = s.player.money;
+      Act.treat(s, n.id);
+      const paid1 = (money0 - s.player.money) === 1;
+      Act.topic(s, n.id, 'talk', Dialogue.best(n));
+      const gotTip = !!(s.play.warmTip && s.play.warmTip[n.id]);
+      const tipTarget = gotTip && s.play.warmTip[n.id].target;
+      const schedSaved = !!(tipTarget && Mentions.schedOf(s, tipTarget).length > 0);
+      Act.talkEnd(s); Act.leave(s);
+      // 3. Hostile talkEnd spreads mild suspicion (+4) to one bystander once
+      const s2 = Game.create('rel-g2', 'normaal');
+      let hostOk = false;
+      for (let p = 0; p < DAY.parts && !hostOk; p++) {
+        s2.clock.part = p;
+        const loc = s2.world.locations.find((l) => s2.cast.filter((x) => Schedule.at(s2, x.id, 1, p) === l.id).length >= 2);
+        if (!loc) continue;
+        const present = s2.cast.filter((x) => Schedule.at(s2, x.id, 1, p) === loc.id).sort(byNameE);
+        const hNpc = present[0], bNpc = present[1];
+        s2.relations[hNpc.id] = { trust: 10, affection: 10, resentment: 80, suspicion: 75, statusText: 'vijandig' };
+        const sus0 = s2.relations[bNpc.id].suspicion;
+        Act.force(s2, loc.id); Act.talkStart(s2, hNpc.id); Act.talkEnd(s2);
+        const sus1 = s2.relations[bNpc.id].suspicion;
+        Act.leave(s2); Act.force(s2, loc.id); Act.talkStart(s2, hNpc.id); Act.talkEnd(s2);
+        hostOk = sus1 === sus0 + 4 && s2.relations[bNpc.id].suspicion === sus1 && s2.play.hostileSpread[hNpc.id] === bNpc.id;
+      }
+      // 4. Backward compatibility: schema-8 save without warmTip/hostileSpread unpacks cleanly
+      const oldJson = JSON.parse(Save.pack(s)); delete oldJson.play.warmTip; delete oldJson.play.hostileSpread;
+      const loaded = Save.unpack(JSON.stringify(oldJson));
+      const compatOk = !!loaded.play.warmTip && !!loaded.play.hostileSpread;
+      return {
+        ok: hasVerzoen && calmed && warmCost === 1 && paid1 && gotTip && schedSaved && hostOk && compatOk,
+        info: [hasVerzoen, calmed, warmCost === 1, paid1, gotTip, schedSaved, hostOk, compatOk].join(', ')
+      };
+    });
+    t('Klokbalans (v0.17.0): niet-alwetende SimPlayer lost zaken op binnen ' + DAY.soft + ' dagen (15 seeds Normaal)', () => {
+      const b = SimPlayer.bench(15, 'normaal');
+      const ok = b.won >= 14 && b.withinSoft >= 13 && b.avgDays <= DAY.soft;
+      return { ok: ok, info: b.won + '/' + b.n + ' (' + b.winRate + '%), gem. ' + b.avgDays + ' dagen (' + b.avgParts + ' dagdelen), binnen ' + DAY.soft + 'd: ' + b.withinSoft };
     });
     return out;
   }

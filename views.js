@@ -460,14 +460,16 @@ const Board = {
     const l = World.loc(s, c.ref);
     return `<div class="bc tk${clsExtra}" ${attr} style="${rotSt}"><i style="background:${TEMPLATE_COLOR[l.template] || '#fff'}" aria-hidden="true"></i><span>${U.esc(l.name)}</span>${ex.hasNew ? '<span class="bc-new">Nieuw</span>' : ''}${ex.mark ? `<span class="bc-mark m-${ex.mark}" aria-hidden="true">${Pins.MARKS[ex.mark].icon}</span>` : ''}</div>`;
   },
-  // top toolbar of the board: switch between Prikbord and Verdachtenoverzicht, plus link-mode, "Alles gezien" & optional hint controls
+  // top toolbar of the board: switch between Prikbord, Verdachtenoverzicht and Spoorboek, plus link-mode, "Alles gezien" & optional hint controls
   bar(s, mode, link, threadKind) {
     const metN = s.cast.filter((n) => s.play.met[n.id]).length;
+    const sbN = typeof Spoorboek !== 'undefined' && Spoorboek.count ? Spoorboek.count(s) : 0;
     const newN = Pins.newIds(s).length;
     const tk = threadKind && Pins.THREAD_KINDS[threadKind] ? threadKind : 'verband';
     const hintBtn = !s.play.ended && Level.id(s) !== 'moeilijk' ? `<button type="button" class="bd-hint-btn" data-ui="hint">Geef een zetje</button>` : '';
+    const isBoard = mode !== 'matrix' && mode !== 'timeline';
     let right = '';
-    if (mode !== 'matrix' && link) {
+    if (isBoard && link) {
       right = `<div class="bd-linkbar" role="region" aria-label="Draadjes trekken">` +
         `<span>Draadje vanaf <b>${U.esc(this.title(s, link))}</b>:</span>` +
         `<div class="bd-tkinds" role="group" aria-label="Betekenis van draadje">` +
@@ -476,15 +478,16 @@ const Board = {
     } else {
       const tCount = Pins.threads(s).length;
       right = `<div class="bd-meta">` +
-        (mode !== 'matrix' && tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
-        (mode !== 'matrix' && newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
+        (isBoard && tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
+        (isBoard && newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
         hintBtn +
         `</div>`;
     }
     return `<div class="bd-bar">` +
       `<div class="bd-modes" role="tablist" aria-label="Weergave van het zaakbord">` +
-        `<button type="button" role="tab" aria-selected="${mode !== 'matrix'}" class="bd-mode${mode !== 'matrix' ? ' on' : ''}" data-ui="bmode" data-v="board">Prikbord</button>` +
+        `<button type="button" role="tab" aria-selected="${isBoard}" class="bd-mode${isBoard ? ' on' : ''}" data-ui="bmode" data-v="board">Prikbord</button>` +
         `<button type="button" role="tab" aria-selected="${mode === 'matrix'}" class="bd-mode${mode === 'matrix' ? ' on' : ''}" data-ui="bmode" data-v="matrix">Verdachtenoverzicht (${metN})</button>` +
+        `<button type="button" role="tab" aria-selected="${mode === 'timeline'}" class="bd-mode${mode === 'timeline' ? ' on' : ''}" data-ui="bmode" data-v="timeline">Spoorboek${sbN > 0 ? ' (' + sbN + ')' : ''}</button>` +
       `</div>${right}</div>`;
   },
   // sel: the selected card (its family lights up); link: the card you pull threads from (v0.11.0, nothing dims)
@@ -494,6 +497,10 @@ const Board = {
     if (link && !byId[link]) link = null;
     if (mode === 'matrix') {
       return { html: this.bar(s, 'matrix', null, threadKind) + this.matrix(s, fam, sel), L: L };
+    }
+    if (mode === 'timeline') {
+      const M = (opt && opt.map) || Travel.map(s);
+      return { html: this.bar(s, 'timeline', null, threadKind) + Spoorboek.html(s, M, (opt && opt.sbSel) || []), L: L };
     }
     const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel && byId[sel] ? this.linked(s, L, sel) : null;
     if (link) sel = link;
@@ -1482,8 +1489,8 @@ const Interrogation = {
 
     const tCards = topics.map((t) => {
       const isLead = t.id.indexOf('ev:') === 0;
-      const kind = t.id === 'alibi' ? 'Alibi' : t.id === 'crime' ? 'De zaak' : t.id.indexOf('chk:') === 0 ? 'Controle' : t.id === 'xt' ? 'Teruggeven' : isLead ? 'Spoor' : 'Kennismaking';
-      return `<button type="button" class="iv-qcard${isLead ? ' lead' : ''}" data-ui="topic" data-v="${U.esc(t.id)}">
+      const kind = t.id === 'verzoen' ? 'Herstel' : t.id === 'alibi' ? 'Alibi' : t.id === 'crime' ? 'De zaak' : t.id.indexOf('chk:') === 0 ? 'Controle' : t.id === 'xt' ? 'Teruggeven' : isLead ? 'Spoor' : 'Kennismaking';
+      return `<button type="button" class="iv-qcard${isLead ? ' lead' : ''}${t.id === 'verzoen' ? ' calm' : ''}" data-ui="topic" data-v="${U.esc(t.id)}">
         <small>${kind}</small><b>${U.esc(t.label)}</b>
       </button>`;
     }).join('');
@@ -1507,6 +1514,7 @@ const Interrogation = {
       </div>`;
     }
 
+    const treatC = Dialogue.treatCost(s, npc);
     const right = `<section class="iv-right">
       <div class="iv-paper" data-ui="skip-type">
         <div class="iv-phead"><span>Verhoortranscript · ${U.esc(World.here(s).name)}</span><button type="button" class="iv-skip-btn" data-ui="skip-type">Alles direct tonen</button></div>
@@ -1519,7 +1527,7 @@ const Interrogation = {
             ${Object.keys(APPROACH).map((k) => `<button type="button" class="sp-chip${approach === k ? ' on' : ''}" aria-pressed="${approach === k}" data-ui="approach" data-v="${k}">${APPROACH[k].label}${Level.get(s).toneHint && Dialogue.best(npc) === k ? ' ★' : ''}</button>`).join('')}
           </div>
           <div class="iv-actions">
-            ${Dialogue.canTreat(s, npc) ? `<button type="button" class="sp-chip" data-ui="treat" data-v="${npc.id}">Trakteer (${TREAT_COST} ${U.esc(s.meta.eraRules.currency || '')})</button>` : ''}
+            ${Dialogue.canTreat(s, npc) ? `<button type="button" class="sp-chip" data-ui="treat" data-v="${npc.id}">Trakteer (${treatC} ${U.esc(s.meta.eraRules.currency || '')}${treatC < TREAT_COST ? ' · vriendenprijs' : ''})</button>` : ''}
             ${hasHeardClaim && !autoTray && !showEv ? `<button type="button" class="sp-chip" data-ui="evtoggle">Bewijsstuk voorleggen…</button>` : ''}
             <button type="button" class="sp-btn" data-ui="talkend">Verhoor afronden</button>
           </div>
@@ -1537,10 +1545,11 @@ const Interrogation = {
 
 const part2 = (fam) => fam === 'toekomst' ? '#5fd3c7' : '#cfe0e3';
 
-/* ---------------- Spoorboek: static mock-up of the time-place diagram (evening 18:00-24:00) ----------------
-   Not engine data: derived by hand from the current case. In v0.6.5 the segments come from truth.night.
-   v0.6.1: not shown in the game (the tab returns in v0.6.5); kept for its test and as the reference. */
-const SB_COLOR = ['#b9442f', '#2f6f8f', '#c48a1c', '#4f7f3a', '#7a4f9a'];
+/* ---------------- Spoorboek (v0.17.0): interactive evening timeline (18:00-24:00) ----------------
+   Driven 100% by real player-discovered state (asked alibis, found sightings/registers/denials/confessions/twists).
+   NEVER reads s.truth.culpritId, s.truth.roles, unasked alibis, or unfound evidence.
+   Legacy mock()/svg()/check() are preserved for regression tests. */
+const SB_COLOR = ['#b9442f', '#2f6f8f', '#c48a1c', '#4f7f3a', '#7a4f9a', '#a35b2a', '#3b6b63', '#8c3b65'];
 const Spoorboek = {
   X0: 220, X1: 1240, Y0: 70, ROW: 74,
   mx(min) { return this.X0 + (min / 360) * (this.X1 - this.X0); },
@@ -1592,6 +1601,324 @@ const Spoorboek = {
     if (sel.length < 2) return null;
     const hit = D.pairs.some((p) => sel.indexOf(p[0]) >= 0 && sel.indexOf(p[1]) >= 0);
     return hit ? { ok: true, text: 'Klopt: die twee kunnen niet allebei waar zijn. Op hetzelfde moment op twee plaatsen.' } : { ok: false, text: 'Die twee sluiten elkaar niet uit. Kies een verklaring en een waarneming op hetzelfde tijdstip.' };
+  },
+
+  /* ----- v0.17.0: real leak-free interactive Spoorboek from discovered player state ----- */
+  _kenmerkIn(txt) {
+    const low = (txt || '').toLowerCase();
+    return Object.keys(KENMERK).find((k) => {
+      const km = KENMERK[k];
+      return low.indexOf(km.saw.toLowerCase()) >= 0 || low.indexOf(km.label.toLowerCase()) >= 0 || low.indexOf(km.desc.toLowerCase()) >= 0;
+    }) || null;
+  },
+  _colorOf(s, npcId) {
+    const sorted = s.cast.slice().sort(byName);
+    const idx = sorted.findIndex((n) => n.id === npcId);
+    return SB_COLOR[(idx >= 0 ? idx : 0) % SB_COLOR.length];
+  },
+  count(s) {
+    if (!s || !s.play) return 0;
+    const p = s.play;
+    let n = 0;
+    s.cast.forEach((c) => { if (p.met[c.id] && p.asked[c.id + ':alibi'] && s.alibis && s.alibis[c.id]) n++; });
+    Evidence.found(s).forEach((e) => {
+      if (['people_witness', 'red_alibi', 'twist_double'].indexOf(e.key) >= 0) n++;
+      if (e.source.type === 'confront' && s.contradictions.some((c) => c.id === e.source.conId && p.resolved[c.id] && c.yields === e.id)) n++;
+    });
+    Object.keys(p.alibiCheck || {}).forEach((id) => {
+      if (p.met[id] && p.asked[id + ':alibi'] && p.alibiCheck[id] && p.alibiCheck[id].ok === false) n++;
+    });
+    return n;
+  },
+  build(s, M) {
+    const p = s.play, lv = Level.get(s);
+    const stations = s.world.locations.slice().sort((a, b) => (M.pos[a.id].y - M.pos[b.id].y) || (M.pos[a.id].x - M.pos[b.id].x));
+    const crimeHour = (s.truth && s.truth.crimeHour) || 21;
+    const crimeMin = Math.max(60, Math.min(300, (crimeHour - 18) * 60));
+    const crimeLocId = s.crime.crimeLocationId;
+    const items = [];
+    const castAlpha = s.cast.slice().sort(byName);
+
+    // 1. Asked alibis of met suspects (alphabetical, leak-free)
+    castAlpha.forEach((n) => {
+      if (!p.met[n.id] || !p.asked[n.id + ':alibi']) return;
+      const a = s.alibis && s.alibis[n.id]; if (!a) return;
+      const comp = a.withId ? World.npc(s, a.withId) : null;
+      const chk = p.alibiCheck && p.alibiCheck[n.id];
+      let status = 'open';
+      if (chk && lv.checkLabel) status = chk.ok ? 'ok' : 'bad';
+      else if (p.cleared[n.id] && lv.checkLabel) status = 'ok';
+      items.push({
+        id: 'al:' + n.id, kind: 'alibi', npcId: n.id, who: n,
+        locId: a.locId, from: Math.max(0, crimeMin - 60), to: Math.min(360, crimeMin + 60), t: crimeMin,
+        withId: a.withId || null, withName: comp ? comp.name : null,
+        status: status, color: this._colorOf(s, n.id),
+        label: 'Alibi ' + U.first(n),
+        detail: n.name + ' zegt rond ' + crimeHour + ':00 bij ' + World.loc(s, a.locId).name + ' te zijn geweest' + (comp ? ' (met ' + comp.name + ')' : ' (alleen)') + '.'
+      });
+    });
+
+    // 2. Broken alibis recorded publicly via alibiCheck (only when alibi was asked & refuted)
+    castAlpha.forEach((n) => {
+      const chk = p.alibiCheck && p.alibiCheck[n.id];
+      if (!chk || chk.ok !== false || !p.met[n.id] || !p.asked[n.id + ':alibi']) return;
+      const a = s.alibis && s.alibis[n.id]; if (!a) return;
+      const byTxt = String(chk.by).indexOf('obj:') === 0 ? 'gevonden stuk' : World.npc(s, chk.by).name;
+      items.push({
+        id: 'den:' + n.id, kind: 'denial', npcId: n.id, who: n,
+        locId: a.locId, t: crimeMin, color: '#b3312a',
+        label: 'Weerlegd: ' + U.first(n),
+        detail: 'Volgens ' + byTxt + ' was ' + n.name + ' om ' + crimeHour + ':00 niet bij ' + World.loc(s, a.locId).name + '.'
+      });
+    });
+
+    // 3. Discovered evidence observations (strictly from Evidence.found(s) + public text matching)
+    const found = Evidence.found(s).slice().sort((a, b) => a.id < b.id ? -1 : 1);
+    found.forEach((e) => {
+      if (e.key === 'people_witness') {
+        const km = this._kenmerkIn(e.text);
+        const by = e.source.npcId ? World.npc(s, e.source.npcId) : null;
+        items.push({
+          id: 'obs:' + e.id, kind: 'witness', evId: e.id, kenmerk: km,
+          locId: crimeLocId, t: crimeMin, color: '#b3312a',
+          label: 'Getuige: ' + (km ? KENMERK[km].label : 'gestalte'),
+          detail: (by ? by.name : 'Getuige') + ' zag rond ' + crimeHour + ':00 bij ' + World.loc(s, crimeLocId).name + ' iemand met ' + (km ? KENMERK[km].met : 'een opvallend kenmerk') + '.'
+        });
+      } else if (e.key === 'red_alibi' && e.source.locationId) {
+        const named = castAlpha.find((n) => e.text.indexOf(n.name) >= 0) || null;
+        items.push({
+          id: 'reg:' + e.id, kind: 'register', evId: e.id, npcId: named ? named.id : null, who: named,
+          locId: e.source.locationId, t: crimeMin, color: named ? this._colorOf(s, named.id) : '#2f6f8f',
+          label: 'Register: ' + (named ? U.first(named) : e.title),
+          detail: e.title + ' bij ' + World.loc(s, e.source.locationId).name + ' rond ' + crimeHour + ':00' + (named ? ' noemt ' + named.name : '') + '.'
+        });
+      } else if (e.key === 'twist_double' && e.source.locationId) {
+        items.push({
+          id: 'dbl:' + e.id, kind: 'distraction', evId: e.id,
+          locId: e.source.locationId, t: Math.max(15, crimeMin - 25), color: '#c48a1c',
+          label: 'Afleiding bij ' + World.loc(s, e.source.locationId).name,
+          detail: 'Kort voor ' + crimeHour + ':00 ontstond er opschudding bij ' + World.loc(s, e.source.locationId).name + ' (' + e.title + ').'
+        });
+      } else if (e.source.type === 'confront') {
+        const con = s.contradictions.find((c) => c.id === e.source.conId && p.resolved[c.id] && c.yields === e.id);
+        if (con && con.kind === 'culprit') {
+          const who = World.npc(s, con.npcId);
+          items.push({
+            id: 'cnf:' + con.npcId, kind: 'confess', evId: e.id, npcId: con.npcId, who: who,
+            locId: crimeLocId, t: crimeMin, color: this._colorOf(s, con.npcId),
+            label: 'Bekentenis: ' + U.first(who),
+            detail: who.name + ' gaf na confrontatie toe om ' + crimeHour + ':00 bij ' + World.loc(s, crimeLocId).name + ' te zijn geweest.'
+          });
+        }
+      }
+    });
+
+    return { stations: stations, items: items, crimeHour: crimeHour, crimeMin: crimeMin, crimeLocId: crimeLocId };
+  },
+  compare(s, D, sel, M) {
+    if (!sel || sel.length < 2) return null;
+    const a = D.items.find((x) => x.id === sel[0]), b = D.items.find((x) => x.id === sel[1]);
+    if (!a || !b) return null;
+    const pair = [a, b], byKind = (k) => pair.find((x) => x.kind === k);
+    const al = byKind('alibi'), den = byKind('denial'), cnf = byKind('confess'), reg = byKind('register'), wit = byKind('witness'), dbl = byKind('distraction');
+    const locName = (id) => { const l = World.loc(s, id); return l ? l.name : '?'; };
+    const walk = (x, y) => M ? MapGen.travel(M, x, y) : Travel.min(s, x, y);
+
+    // 1. Alibi vs Denial of same person
+    if (al && den) {
+      if (al.npcId === den.npcId) {
+        return { kind: 'conflict', title: 'Tegenstrijdigheid: alibi gebroken', text: al.who.name + ' zei om ' + D.crimeHour + ':00 bij ' + locName(al.locId) + ' te zijn geweest, maar dat alibi is tegengesproken.' };
+      }
+      return { kind: 'neutral', title: 'Andere personen', text: 'Deze twee punten horen bij ' + al.who.name + ' en ' + den.who.name + ' — kies twee items van dezelfde persoon of vergelijk met een waarneming.' };
+    }
+    // 2. Alibi vs Confession at crime scene
+    if (al && cnf) {
+      if (al.npcId === cnf.npcId) {
+        return { kind: 'conflict', title: 'Tegenstrijdigheid: weerlegd alibi', text: al.who.name + ' beweerde bij ' + locName(al.locId) + ' te zijn, maar gaf na confrontatie toe rond ' + D.crimeHour + ':00 bij ' + locName(cnf.locId) + ' te zijn geweest.' };
+      }
+      return { kind: 'neutral', title: 'Andere personen', text: 'De bekentenis hoort bij ' + cnf.who.name + ', niet bij ' + al.who.name + '.' };
+    }
+    // 3. Alibi vs Register entry
+    if (al && reg) {
+      if (reg.npcId && reg.npcId === al.npcId) {
+        if (reg.locId !== al.locId) {
+          const w = walk(al.locId, reg.locId);
+          return { kind: 'conflict', title: 'Tegenstrijdigheid op de tijdlijn!', text: al.who.name + ' zei om ' + D.crimeHour + ':00 bij ' + locName(al.locId) + ' te zijn, maar staat rond hetzelfde uur in het register van ' + locName(reg.locId) + ' (' + w + ' min lopen verderop).', travelMin: w };
+        }
+        return { kind: 'match', title: 'Bevestigd door het register', text: 'Het register van ' + locName(reg.locId) + ' bevestigt de verklaring van ' + al.who.name + '.' };
+      }
+      return { kind: 'neutral', title: 'Geen directe botsing', text: 'Dit registerspoor noemt ' + (reg.who ? reg.who.name : 'iemand anders') + ', niet ' + al.who.name + '.' };
+    }
+    // 4. Alibi vs Witness sighting (kenmerk match without ever leaking culprit)
+    if (al && wit) {
+      const w = walk(al.locId, wit.locId);
+      if (wit.kenmerk && al.who.kenmerk === wit.kenmerk) {
+        return { kind: 'clue', title: 'Opvallend verband (kenmerk past)', text: al.who.name + ' ' + KENMERK[wit.kenmerk].desc + ' — precies wat de getuige zag bij ' + locName(wit.locId) + '. Toch zegt ' + U.first(al.who) + ' rond ' + D.crimeHour + ':00 bij ' + locName(al.locId) + ' te zijn geweest (' + w + ' min lopen). Controleer dit alibi!', travelMin: w };
+      }
+      return { kind: 'neutral', title: 'Kenmerk past niet', text: 'De getuige zag iemand met ' + (wit.kenmerk ? KENMERK[wit.kenmerk].met : 'een ander kenmerk') + '. Dat kenmerk hoort niet bij ' + al.who.name + '.' };
+    }
+    // 5. Distraction (dubbel twist) vs Witness or Alibi
+    if (dbl && wit) {
+      const w = walk(dbl.locId, wit.locId);
+      return { kind: 'clue', title: 'Looptijd afleiding → plaats delict: ' + w + ' min', text: 'Van ' + locName(dbl.locId) + ' naar ' + locName(wit.locId) + ' is het ' + w + ' minuten lopen. Eén persoon kon eerst de afleiding veroorzaken en rond ' + D.crimeHour + ':00 bij ' + locName(wit.locId) + ' zijn.', travelMin: w };
+    }
+    if (dbl && al) {
+      const w1 = walk(dbl.locId, D.crimeLocId), w2 = walk(al.locId, dbl.locId);
+      return { kind: 'clue', title: 'Afleiding op de tijdlijn', text: 'De afleiding bij ' + locName(dbl.locId) + ' ligt op ' + w2 + ' min lopen van ' + locName(al.locId) + ' (alibi van ' + U.first(al.who) + ') en ' + w1 + ' min van ' + locName(D.crimeLocId) + '.', travelMin: w1 };
+    }
+    // 6. Two alibis compared
+    if (a.kind === 'alibi' && b.kind === 'alibi') {
+      if (a.locId === b.locId && (a.withId === b.npcId || b.withId === a.npcId)) {
+        return { kind: 'match', title: 'Zelfde plek rond ' + D.crimeHour + ':00', text: a.who.name + ' en ' + b.who.name + ' noemen allebei ' + locName(a.locId) + ' als plek voor die avond.' };
+      }
+      if (a.locId === b.locId) {
+        return { kind: 'clue', title: 'Zelfde locatie genoemd', text: 'Zowel ' + U.first(a.who) + ' als ' + U.first(b.who) + ' zegt rond ' + D.crimeHour + ':00 bij ' + locName(a.locId) + ' te zijn geweest.' };
+      }
+      const w = walk(a.locId, b.locId);
+      return { kind: 'neutral', title: 'Twee verschillende plekken (' + w + ' min lopen)', text: U.first(a.who) + ' noemt ' + locName(a.locId) + ' en ' + U.first(b.who) + ' noemt ' + locName(b.locId) + '. Ze sluiten elkaar niet uit.', travelMin: w };
+    }
+    const w = walk(a.locId, b.locId);
+    return { kind: 'neutral', title: 'Geen directe tegenstrijdigheid', text: a.label + ' (' + locName(a.locId) + ') en ' + b.label + ' (' + locName(b.locId) + ')' + (a.locId !== b.locId ? ' liggen ' + w + ' min lopen uit elkaar' : ' spelen zich op dezelfde plek af') + '.', travelMin: w };
+  },
+  renderSvg(s, D, sel, cmp) {
+    const rowY = {}, H = this.Y0 + D.stations.length * this.ROW + 34;
+    D.stations.forEach((l, i) => { rowY[l.id] = this.Y0 + i * this.ROW + this.ROW / 2; });
+    const crimeX = this.mx(D.crimeMin);
+    let h = `<svg class="sb-svg" viewBox="0 0 1270 ${H}" role="group" aria-label="Spoorboek van de avond van 18:00 tot 24:00">`;
+    // Highlight band on the crime location row
+    if (rowY[D.crimeLocId] != null) {
+      h += `<rect x="${this.X0}" y="${rowY[D.crimeLocId] - this.ROW / 2}" width="${this.X1 - this.X0}" height="${this.ROW}" fill="#b3312a" fill-opacity=".06"/>`;
+    }
+    // Time grid (18:00–24:00)
+    for (let m = 0; m <= 360; m += 30) {
+      const x = this.mx(m);
+      h += `<line class="grid" x1="${x}" y1="${this.Y0 - 10}" x2="${x}" y2="${H - 24}" stroke-width="${m % 60 ? 0.6 : 1.3}"/>`;
+      if (m % 60 === 0) h += `<text class="hr" x="${x}" y="${this.Y0 - 18}" text-anchor="middle">${this.clock(m)}</text>`;
+    }
+    // Vertical crime-hour marker
+    h += `<line x1="${crimeX}" y1="${this.Y0 - 10}" x2="${crimeX}" y2="${H - 24}" stroke="#b3312a" stroke-width="2" stroke-dasharray="6 4" opacity=".7"/>`;
+    h += `<text x="${crimeX}" y="${H - 7}" text-anchor="middle" font-size="11" font-weight="700" fill="#b3312a">Voorval (~${D.crimeHour}:00)</text>`;
+    // Station rows
+    D.stations.forEach((l) => {
+      const y = rowY[l.id], isCr = l.id === D.crimeLocId;
+      h += `<line class="grid" x1="${this.X0}" y1="${y}" x2="${this.X1}" y2="${y}" stroke-width="1"/>`;
+      h += `<text class="rowl${isCr ? ' crime' : ''}" x="${this.X0 - 14}" y="${y + 5}" text-anchor="end">${U.esc(l.name)}${isCr ? ' ✕' : ''}</text>`;
+    });
+
+    // Stack offsets for multiple alibis on the same station row
+    const alibisByLoc = {};
+    D.items.filter((x) => x.kind === 'alibi').forEach((x) => { (alibisByLoc[x.locId] = alibisByLoc[x.locId] || []).push(x); });
+    const posOf = {};
+
+    // Draw alibi segments (labels alternate left/right of the bar so stacked bars never collide)
+    D.items.filter((x) => x.kind === 'alibi').forEach((it) => {
+      const group = alibisByLoc[it.locId], idx = group.indexOf(it);
+      const dy = (idx - (group.length - 1) / 2) * 16;
+      const y = rowY[it.locId] + dy, x1 = this.mx(it.from), x2 = this.mx(it.to), on = sel.indexOf(it.id) >= 0;
+      posOf[it.id] = { x: this.mx(it.t), y: y };
+      const dash = it.status === 'bad' ? ' stroke-dasharray="9 5"' : '';
+      const badge = it.status === 'ok' ? ' ✓' : it.status === 'bad' ? ' ✗' : '';
+      const onLeft = idx % 2 === 0;
+      h += `<g class="seg${on ? ' on' : ''}" data-sb="${U.esc(it.id)}" tabindex="0" role="button" aria-pressed="${on}" aria-label="${U.esc(it.detail)}">` +
+        `<line class="halo" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="transparent" stroke-width="18" stroke-linecap="round"/>` +
+        `<line class="vis" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="${it.color}" stroke-width="${on ? 10 : 7}" stroke-linecap="round"${dash}/>` +
+        `</g>` +
+        `<text class="who" x="${onLeft ? x1 - 10 : x2 + 10}" y="${y + 4}" text-anchor="${onLeft ? 'end' : 'start'}" fill="${it.color}">${U.esc(U.first(it.who) + badge)}</text>`;
+    });
+
+    // Draw point observations (witness, denial, register, confess, distraction)
+    const dotsByLoc = {};
+    D.items.filter((x) => x.kind !== 'alibi').forEach((x) => { (dotsByLoc[x.locId] = dotsByLoc[x.locId] || []).push(x); });
+    D.items.filter((x) => x.kind !== 'alibi').forEach((it) => {
+      const group = dotsByLoc[it.locId], idx = group.indexOf(it);
+      const dx = (idx - (group.length - 1) / 2) * 26;
+      const x = this.mx(it.t) + dx, y = rowY[it.locId], on = sel.indexOf(it.id) >= 0;
+      posOf[it.id] = { x: x, y: y };
+      const r = on ? 11 : 8;
+      let shape = `<circle class="vis" cx="${x}" cy="${y}" r="${r}" fill="var(--sp-mapbg)" stroke="${it.color}" stroke-width="4"/>`;
+      if (it.kind === 'distraction') {
+        shape = `<rect class="vis" x="${x - r}" y="${y - r}" width="${r * 2}" height="${r * 2}" rx="2" transform="rotate(45 ${x} ${y})" fill="var(--sp-mapbg)" stroke="${it.color}" stroke-width="3.5"/>`;
+      } else if (it.kind === 'denial') {
+        shape = `<circle class="vis" cx="${x}" cy="${y}" r="${r}" fill="#b3312a" stroke="var(--sp-mapbg)" stroke-width="2.5"/><path d="M${x - 4} ${y - 4} L${x + 4} ${y + 4} M${x + 4} ${y - 4} L${x - 4} ${y + 4}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`;
+      }
+      h += `<g class="seg${on ? ' on' : ''}" data-sb="${U.esc(it.id)}" tabindex="0" role="button" aria-pressed="${on}" aria-label="${U.esc(it.detail)}">` +
+        `<circle cx="${x}" cy="${y}" r="16" fill="transparent"/>${shape}</g>` +
+        `<text class="who sb-dot-lbl" x="${x + 13}" y="${y + (idx % 2 ? -12 : 21)}" fill="${it.color}">${U.esc(it.label)}</text>`;
+    });
+
+    // Connector line when 2 items are selected
+    if (sel.length === 2 && posOf[sel[0]] && posOf[sel[1]]) {
+      const p1 = posOf[sel[0]], p2 = posOf[sel[1]];
+      if (cmp && cmp.kind === 'conflict') {
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        if (dist > 14) {
+          const steps = Math.max(4, Math.round(dist / 16)), ux = (p2.x - p1.x) / dist, uy = (p2.y - p1.y) / dist;
+          let z = `M${p1.x.toFixed(1)} ${p1.y.toFixed(1)}`;
+          for (let i = 1; i < steps; i++) {
+            const t = i / steps, sgn = i % 2 ? 7 : -7;
+            z += ` L${(p1.x + (p2.x - p1.x) * t - uy * sgn).toFixed(1)} ${(p1.y + (p2.y - p1.y) * t + ux * sgn).toFixed(1)}`;
+          }
+          h += `<path d="${z} L${p2.x.toFixed(1)} ${p2.y.toFixed(1)}" stroke="#b3312a" stroke-width="3.2" fill="none" pointer-events="none"/>`;
+        } else {
+          h += `<circle cx="${p1.x.toFixed(1)}" cy="${p1.y.toFixed(1)}" r="16" fill="none" stroke="#b3312a" stroke-width="3" stroke-dasharray="5 3" pointer-events="none"/>`;
+        }
+      } else {
+        const col = cmp && cmp.kind === 'match' ? '#3c7031' : cmp && cmp.kind === 'clue' ? '#c48a1c' : 'var(--sp-mute)';
+        h += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${col}" stroke-width="2.4" stroke-dasharray="6 4" pointer-events="none"/>`;
+      }
+    }
+    return h + '</svg>';
+  },
+  html(s, M, sel) {
+    const D = this.build(s, M);
+    const activeSel = (sel || []).filter((id) => D.items.some((x) => x.id === id)).slice(0, 2);
+    const cmp = this.compare(s, D, activeSel, M);
+    const link = (txt) => Mentions.linkHtml(s, txt);
+
+    let h = `<div class="sb-wrap">`;
+    h += `<div class="sb-intro"><p>Het Spoorboek zet alle ontdekte alibi's en tijdsporen van de avond (18:00–24:00) naast elkaar. <b>Tik op twee balken of punten</b> om te controleren of ze met elkaar botsen of elkaar bevestigen.</p>`;
+    h += `<div class="sb-legend" aria-hidden="true">` +
+      `<span><i class="sb-lg-bar"></i>Alibi-verklaring</span>` +
+      `<span><i class="sb-lg-dot"></i>Waarneming / spoor</span>` +
+      `<span><i class="sb-lg-x"></i>Weerlegd alibi</span>` +
+      `<span><i class="sb-lg-cr"></i>Tijdstip voorval (~${D.crimeHour}:00)</span>` +
+      `</div></div>`;
+
+    if (!D.items.length) {
+      h += `<div class="sb-empty"><h3>Nog geen tijdsporen ontdekt</h3><p>Vraag betrokkenen tijdens een verhoor waar ze die avond waren, of zoek sporen met tijdstippen. Zodra je het eerste alibi of een waarneming hoort, verschijnt die hier op de tijdlijn.</p></div>`;
+      return h + `</div>`;
+    }
+
+    h += `<div class="sb-scroll">${this.renderSvg(s, D, activeSel, cmp)}</div>`;
+
+    // Comparison readout
+    if (cmp) {
+      h += `<div class="sb-result sb-${cmp.kind}" role="status" aria-live="polite">` +
+        `<div class="sb-res-body"><b>${U.esc(cmp.title)}</b><p>${link(cmp.text)}</p></div>` +
+        `<button type="button" class="sp-chip" data-ui="sb-clear">Wis selectie</button>` +
+        `</div>`;
+    } else if (activeSel.length === 1) {
+      const it = D.items.find((x) => x.id === activeSel[0]);
+      h += `<div class="sb-result sb-pick" role="status" aria-live="polite">` +
+        `<div class="sb-res-body"><b>Geselecteerd: ${U.esc(it.label)}</b><p>${link(it.detail)} Kies nu een tweede balk of punt om te vergelijken.</p></div>` +
+        `<button type="button" class="sp-chip" data-ui="sb-clear">Wis selectie</button>` +
+        `</div>`;
+    } else {
+      h += `<div class="sb-result sb-idle"><p>Selecteer twee punten op het Spoorboek of uit de lijst hieronder om ze te vergelijken.</p></div>`;
+    }
+
+    // Accessible selectable list of discovered items
+    h += `<div class="sb-list" role="group" aria-label="Ontdekte tijdsporen">` +
+      D.items.map((it) => {
+        const on = activeSel.indexOf(it.id) >= 0;
+        const kindLbl = it.kind === 'alibi' ? 'Alibi' : it.kind === 'denial' ? 'Weerlegd' : it.kind === 'witness' ? 'Getuige' : it.kind === 'register' ? 'Register' : it.kind === 'confess' ? 'Bekentenis' : 'Afleiding';
+        return `<button type="button" class="sb-item${on ? ' on' : ''} sb-k-${it.kind}" data-sb="${U.esc(it.id)}" aria-pressed="${on}" style="--sbc:${it.color}">` +
+          `<span class="sb-it-k">${kindLbl}</span><b>${U.esc(it.label)}</b><small>${U.esc(World.loc(s, it.locId).name)} · ~${this.clock(it.t)}</small>` +
+        `</button>`;
+      }).join('') +
+      `</div>`;
+
+    return h + `</div>`;
   }
 };
 
