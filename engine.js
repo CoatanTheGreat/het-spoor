@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.17.0', schema: 8 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.18.0', schema: 9 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -2241,20 +2241,150 @@ const Store = {
   }
 };
 const Save = {
-  pack: (s) => JSON.stringify(s),
-  unpack(text) {
-    let s; try { s = typeof text === 'string' ? JSON.parse(text) : text; } catch (e) { throw new Error('Geen geldig JSON-bestand.'); }
-    if (!s || typeof s !== 'object') throw new Error('Leeg bestand.');
-    if (s.schema !== APP.schema) throw new Error('Deze savegame heeft schema ' + (s.schema || '?') + '. Versie ' + APP.version + ' leest alleen schema ' + APP.schema + ': de puzzel is opnieuw opgebouwd, met alibi\'s die je zelf controleert. Oude saves zijn niet over te zetten; je kunt het bestand wel bewaren.');
-    ['seed', 'clock', 'player', 'world', 'cast', 'crowd', 'schedule', 'evidence', 'contradictions', 'relations', 'alibis', 'settings', 'play', 'log'].forEach((k) => { if (!(k in s)) throw new Error('Savegame mist "' + k + '".'); });
-    if (typeof s.clock.part !== 'number') throw new Error('Savegame heeft geen dagdeel in de klok.');
-    s.visit = s.visit || null; s.ui = s.ui || {}; s.play.early = s.play.early || {}; s.play.alibiCheck = s.play.alibiCheck || {}; s.player.links = s.player.links || {}; if (!Array.isArray(s.player.threads)) s.player.threads = Pins.migrate(s); s.player.archive = s.player.archive || {};
-    s.player.marks = s.player.marks || {}; s.player.notes = s.player.notes || {};
-    Clock.norm(s); s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
-    if (!s.play.heardOf || !s.play.heardOfLoc) { s.play.heardOf = s.play.heardOf || {}; s.play.heardOfLoc = s.play.heardOfLoc || {}; (s.log || []).forEach((e) => Mentions.scan(s, e)); }
-    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread'].forEach((k) => { s.play[k] = s.play[k] || {}; });
+  MIN_SCHEMA: 8,
+  REQUIRED: ['seed', 'clock', 'player', 'world', 'cast', 'crowd', 'schedule', 'evidence', 'contradictions', 'relations', 'alibis', 'settings', 'play', 'log'],
+  lastMigration: null,
+  // v0.18.0 (Fase H): structured schema-evolution pipeline.
+  // Each key `fromSchema` migrates a save object one step forward to `fromSchema + 1` and returns it.
+  MIGRATIONS: {
+    8(s) {
+      // Schema 8 (v0.8.0-v0.17.0) -> Schema 9 (v0.18.0):
+      // Normalizes all incremental fields introduced across v0.11-v0.17 (free threads, archive,
+      // clock minutes, player position, mentions/ghost cards, marks/notes, seen badges, schedule tips,
+      // and relationship tracking) into an explicit canonical schema-9 save without false "Nieuw" badges.
+      s.visit = s.visit || null;
+      s.ui = s.ui || {};
+      s.play.early = s.play.early || {};
+      s.play.alibiCheck = s.play.alibiCheck || {};
+      s.player.links = s.player.links || {};
+      if (!Array.isArray(s.player.threads)) s.player.threads = Pins.migrate(s);
+      s.player.archive = s.player.archive || {};
+      s.player.marks = s.player.marks || {};
+      s.player.notes = s.player.notes || {};
+      Clock.norm(s);
+      s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
+      if (!s.play.heardOf || !s.play.heardOfLoc) {
+        s.play.heardOf = s.play.heardOf || {};
+        s.play.heardOfLoc = s.play.heardOfLoc || {};
+        (s.log || []).forEach((e) => Mentions.scan(s, e));
+      }
+      ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread'].forEach((k) => {
+        s.play[k] = s.play[k] || {};
+      });
+      if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
+      if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
+      s.schema = 9;
+      s.version = APP.version;
+      return s;
+    }
+  },
+  canMigrate(fromSchema, toSchema, registry) {
+    const target = typeof toSchema === 'number' ? toSchema : APP.schema;
+    const reg = registry || this.MIGRATIONS;
+    if (typeof fromSchema !== 'number' || !Number.isInteger(fromSchema)) return false;
+    if (fromSchema === target) return true;
+    if (fromSchema < this.MIN_SCHEMA || fromSchema > target) return false;
+    for (let v = fromSchema; v < target; v++) {
+      if (typeof reg[v] !== 'function') return false;
+    }
+    return true;
+  },
+  validate(s, targetSchema, registry) {
+    const target = typeof targetSchema === 'number' ? targetSchema : APP.schema;
+    if (!s || typeof s !== 'object' || Array.isArray(s)) throw new Error('Leeg of ongeldig bestand.');
+    if (typeof s.schema !== 'number' || !Number.isInteger(s.schema) || s.schema < 1) {
+      throw new Error('Dit bestand is geen geldige Het Spoor-savegame (schema ontbreekt of is ongeldig).');
+    }
+    if (s.schema < this.MIN_SCHEMA) {
+      throw new Error('Deze savegame heeft schema ' + s.schema + ' (te oud). Versie ' + APP.version + ' leest saves vanaf schema ' + this.MIN_SCHEMA + ' t/m ' + target + ': de puzzel is sindsdien opnieuw opgebouwd, met alibi\'s die je zelf controleert. Oude saves zijn niet over te zetten; je kunt het bestand wel bewaren.');
+    }
+    if (s.schema > target) {
+      throw new Error('Deze savegame heeft schema ' + s.schema + ', nieuwer dan deze versie van Het Spoor (' + APP.version + ', schema ' + target + '). Vernieuw de app om dit bestand te kunnen openen.');
+    }
+    if (!this.canMigrate(s.schema, target, registry)) {
+      throw new Error('Geen migratiepad beschikbaar van schema ' + s.schema + ' naar schema ' + target + '.');
+    }
+    this.REQUIRED.forEach((k) => { if (!(k in s)) throw new Error('Savegame mist "' + k + '".'); });
+    if (!s.clock || typeof s.clock !== 'object' || typeof s.clock.part !== 'number') throw new Error('Savegame heeft geen dagdeel in de klok.');
+    if (!s.player || typeof s.player !== 'object' || Array.isArray(s.player)) throw new Error('Savegame heeft een ongeldig spelersprofiel.');
+    if (!s.play || typeof s.play !== 'object' || Array.isArray(s.play)) throw new Error('Savegame heeft een ongeldige spelstatus.');
+    if (!s.world || typeof s.world !== 'object' || !Array.isArray(s.world.locations)) throw new Error('Savegame mist geldige locaties.');
+    if (!Array.isArray(s.cast) || !Array.isArray(s.evidence) || !Array.isArray(s.log)) throw new Error('Savegame heeft een ongeldige zaakstructuur.');
+    return true;
+  },
+  migrate(s, targetSchema, registry) {
+    const target = typeof targetSchema === 'number' ? targetSchema : APP.schema;
+    const reg = registry || this.MIGRATIONS;
+    const from = s.schema;
+    if (!this.canMigrate(from, target, reg)) {
+      throw new Error('Kan savegame niet migreren van schema ' + from + ' naar schema ' + target + '.');
+    }
+    const steps = [];
+    let cur = s;
+    for (let v = from; v < target; v++) {
+      const fn = reg[v];
+      const next = fn(cur);
+      if (!next || typeof next !== 'object' || next.schema !== v + 1) {
+        throw new Error('Savegame-migratie van schema ' + v + ' naar ' + (v + 1) + ' is mislukt.');
+      }
+      cur = next;
+      steps.push(v + '->' + (v + 1));
+    }
+    return { state: cur, from: from, to: target, steps: steps };
+  },
+  normalize(s) {
+    s.visit = s.visit || null;
+    s.ui = s.ui || {};
+    s.play.early = s.play.early || {};
+    s.play.alibiCheck = s.play.alibiCheck || {};
+    s.player.links = s.player.links || {};
+    if (!Array.isArray(s.player.threads)) s.player.threads = Pins.migrate(s);
+    s.player.archive = s.player.archive || {};
+    s.player.marks = s.player.marks || {};
+    s.player.notes = s.player.notes || {};
+    Clock.norm(s);
+    s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
+    if (!s.play.heardOf || !s.play.heardOfLoc) {
+      s.play.heardOf = s.play.heardOf || {};
+      s.play.heardOfLoc = s.play.heardOfLoc || {};
+      (s.log || []).forEach((e) => Mentions.scan(s, e));
+    }
+    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread'].forEach((k) => {
+      s.play[k] = s.play[k] || {};
+    });
     if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
     if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
+    return s;
+  },
+  inspect(raw) {
+    if (!raw) return { ok: false, empty: true, label: 'leeg' };
+    let m = null;
+    try { m = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { return { ok: false, label: 'ongeldig bestand' }; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return { ok: false, label: 'ongeldig bestand' };
+    const sch = m.schema;
+    if (typeof sch !== 'number' || !Number.isInteger(sch)) return { ok: false, schema: sch, label: 'ongeldige save' };
+    if (sch < this.MIN_SCHEMA) return { ok: false, schema: sch, label: 'te oude versie (schema ' + sch + ')' };
+    if (sch > APP.schema) return { ok: false, schema: sch, label: 'nieuwere versie (schema ' + sch + ')' };
+    const title = m.meta && m.meta.title ? m.meta.title : (m.seed || 'Onbekende zaak');
+    const time = m.clock && typeof m.clock.part === 'number' ? U.time(m.clock) : '?';
+    const mig = sch < APP.schema && this.canMigrate(sch, APP.schema);
+    return {
+      ok: sch === APP.schema || mig,
+      migratable: mig,
+      schema: sch,
+      title: title,
+      time: time,
+      label: title + ', ' + time + (mig ? ' (schema ' + sch + ' → ' + APP.schema + ')' : '')
+    };
+  },
+  pack: (s) => JSON.stringify(s),
+  unpack(text) {
+    let s;
+    try { s = typeof text === 'string' ? JSON.parse(text) : text; } catch (e) { throw new Error('Geen geldig JSON-bestand.'); }
+    this.validate(s);
+    const res = this.migrate(s, APP.schema);
+    s = this.normalize(res.state);
+    this.lastMigration = res.steps.length ? { from: res.from, to: res.to, steps: res.steps } : null;
     return s;
   },
   meta: (s) => ({ seed: s.seed, title: s.meta.title, time: U.time(s.clock), saved: new Date().toISOString() })
@@ -3123,6 +3253,71 @@ const Tests = {
       const b = SimPlayer.bench(15, 'normaal');
       const ok = b.won >= 14 && b.withinSoft >= 13 && b.avgDays <= DAY.soft;
       return { ok: ok, info: b.won + '/' + b.n + ' (' + b.winRate + '%), gem. ' + b.avgDays + ' dagen (' + b.avgParts + ' dagdelen), binnen ' + DAY.soft + 'd: ' + b.withinSoft };
+    });
+    // ----- v0.18.0 (fase H): structured Save.MIGRATIONS schema pipeline -----
+    t('Save.MIGRATIONS (v0.18.0): schema-8 save uit v0.10-v0.17 migreert schoon naar schema ' + APP.schema + ' zonder valse Nieuw-badges', () => {
+      const s = SpikeData.make('mig8-h1', 'midden'), ev = s.evidence.find((x) => x.route !== 'start' && s.play.found[x.id]) || s.evidence[1];
+      s.play.found[ev.id] = { day: 1 };
+      const raw = JSON.parse(Save.pack(s));
+      raw.schema = 8; raw.version = 'v0.10.0';
+      raw.player.links = {}; raw.player.links[ev.id] = s.cast[0].id;
+      delete raw.player.threads; delete raw.player.archive; delete raw.player.marks; delete raw.player.notes;
+      delete raw.player.seen; delete raw.player.seenJournal;
+      delete raw.clock.min; delete raw.pos;
+      delete raw.play.heardOf; delete raw.play.heardOfLoc; delete raw.play.knownSched; delete raw.play.warmTip; delete raw.play.hostileSpread;
+      const json8 = JSON.stringify(raw);
+      const info = Save.inspect(json8);
+      const mig = Save.unpack(json8);
+      const lm1 = Save.lastMigration;
+      const packed = Save.pack(mig), again = Save.unpack(packed), lm2 = Save.lastMigration;
+      const ok = info.ok && info.migratable && info.schema === 8 && info.label.indexOf('8 → ' + APP.schema) >= 0 &&
+        mig.schema === APP.schema && lm1 && lm1.from === 8 && lm1.to === APP.schema && lm1.steps[0] === '8->9' &&
+        Array.isArray(mig.player.threads) && Pins.has(mig, Pins.cardOf(mig, ev.id), 'p:' + s.cast[0].id) &&
+        typeof mig.clock.min === 'number' && !!mig.pos && typeof mig.play.knownSched === 'object' &&
+        typeof mig.play.warmTip === 'object' && typeof mig.play.hostileSpread === 'object' &&
+        Pins.newIds(mig).length === 0 && Pins.journalNew(mig) === 0 &&
+        lm2 === null && Save.pack(again) === packed;
+      return { ok: ok, info: (lm1 ? lm1.steps.join(', ') : 'geen') + ', nieuw=' + Pins.newIds(mig).length + '/' + Pins.journalNew(mig) };
+    });
+    t('Save.MIGRATIONS (v0.18.0): meerstaps-keten (8->9->10) werkt en te oude/toekomstige/ongeldige bestanden geven duidelijke foutmelding', () => {
+      const s = Game.create('mig-err', 'normaal');
+      const raw8 = JSON.parse(Save.pack(s)); raw8.schema = 8;
+      const customReg = Object.assign({}, Save.MIGRATIONS, { 9(st) { st.schema = 10; st.ui.migrated10 = true; return st; } });
+      const multiOk = Save.canMigrate(8, 10, customReg) && !Save.canMigrate(7, 10, customReg) && !Save.canMigrate(11, 10, customReg);
+      const res10 = Save.migrate(U.clone(raw8), 10, customReg);
+      const chainOk = res10.from === 8 && res10.to === 10 && res10.steps.join(',') === '8->9,9->10' && res10.state.schema === 10 && res10.state.ui.migrated10 === true;
+      // Broken migration step that forgets to bump schema must throw
+      let brokenThrew = false;
+      try { Save.migrate(U.clone(raw8), 9, { 8(st) { return st; } }); } catch (e) { brokenThrew = e.message.indexOf('mislukt') >= 0; }
+      const expectErr = (input, needle) => {
+        try { Save.unpack(input); return false; } catch (e) { return e.message.toLowerCase().indexOf(needle) >= 0; }
+      };
+      const errs = [
+        expectErr('{kapot', 'json'),
+        expectErr('[]', 'ongeldig'),
+        expectErr('null', 'ongeldig'),
+        expectErr('{}', 'schema'),
+        expectErr(JSON.stringify(Object.assign({}, raw8, { schema: 7 })), 'te oud'),
+        expectErr(JSON.stringify(Object.assign({}, raw8, { schema: 99 })), 'nieuwer'),
+        expectErr(JSON.stringify(Object.assign({}, raw8, { clock: {} })), 'dagdeel'),
+        expectErr(JSON.stringify(Object.assign({}, raw8, { cast: 'geen-array' })), 'zaakstructuur')
+      ];
+      const inspOld = Save.inspect(JSON.stringify(Object.assign({}, raw8, { schema: 6 })));
+      const inspFut = Save.inspect(JSON.stringify(Object.assign({}, raw8, { schema: 99 })));
+      const inspOk = !inspOld.ok && inspOld.label.indexOf('te oude') >= 0 && !inspFut.ok && inspFut.label.indexOf('nieuwere') >= 0;
+      return { ok: multiOk && chainOk && brokenThrew && errs.every(Boolean) && inspOk, info: 'keten=' + chainOk + ', fouten=' + errs.filter(Boolean).length + '/' + errs.length };
+    });
+    t('Save.MIGRATIONS (v0.18.0): gemigreerde schema-8 save blijft 100% geldig en lekvrij in Game.check, Verdachtenmatrix en Spoorboek', () => {
+      const s = SpikeData.make('mig-leak-1', 'midden'), raw = JSON.parse(Save.pack(s));
+      raw.schema = 8; delete raw.player.seen; delete raw.player.seenJournal; delete raw.play.knownSched;
+      const mig = Save.unpack(JSON.stringify(raw));
+      const chk = Game.check(mig);
+      const M = MapGen.build(mig), fam = famOf(mig);
+      const w = U.clone(mig), other = w.cast.find((n) => n.id !== w.truth.culpritId);
+      w.truth.culpritId = other.id; w.cast.reverse();
+      const sameMx = Board.matrix(mig, fam, null) === Board.matrix(w, fam, null);
+      const sameSb = Spoorboek.html(mig, M, []) === Spoorboek.html(w, M, []);
+      return { ok: chk.length === 0 && sameMx && sameSb, info: 'checks=' + chk.length + ', matrix=' + sameMx + ', spoorboek=' + sameSb };
     });
     return out;
   }

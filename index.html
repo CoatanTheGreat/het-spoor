@@ -5,11 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Het Spoor">
+<meta name="description" content="Het Spoor — een volledig offline Nederlands detectivespel. Vier dagen, een stad vol sporen, en één dader.">
+<meta name="theme-color" content="#f4efe3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1e1b18" media="(prefers-color-scheme: dark)">
 <title>Het Spoor</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- v0.17.0: interactive leak-free Spoorboek timeline (18:00-24:00) on the Zaakbord, extra Plot-DNA twists (dubbel & slachtofferliegt), relationship gameplay effects (verzoen, warmTip, warm treat discount, hostileSpread), and non-omniscient SimPlayer clock-balance validation. Load order matters: content, library, engine, views, ui. -->
+<!-- v0.18.0 (Fase H): PWA (manifest, 0 KB SVG icons, versioned offline-first Service Worker with update banner), structured Save.MIGRATIONS schema pipeline (schema 8 -> 9), and automated zero-dependency browser/a11y test suite. Load order matters: content, library, engine, views, ui. -->
 <a class="skip-link" href="#main">Ga naar inhoud</a>
 <div id="app" hidden></div>
 <div id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle" hidden>
@@ -32,6 +39,7 @@
 </div>
 <div id="aha" class="aha" role="status" aria-live="polite" aria-atomic="true" hidden></div>
 <div id="toast" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+<div id="swUpdate" class="sw-update" role="status" aria-live="polite" hidden></div>
 <script defer src="content.js"></script>
 <script defer src="lib.js"></script>
 <script defer src="engine.js"></script>

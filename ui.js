@@ -151,12 +151,91 @@ const SFX = {
 };
 const UI = {
   s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sbSel: [], sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  swStatus: 'idle', swReg: null, swWaiting: null, _swUserReload: false, _swRefreshing: false,
   _shell: null, _headHtml: null, _stageKey: null, _drawerHtml: null, _drawerId: null, _coachHtml: null, _boardLayout: null, _boardRO: null, _rafThreads: 0, _noteSaveT: null,
   btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
+
+  // v0.18.0 (Fase H): safe PWA Service Worker registration (works cleanly on HTTP(S) and file://)
+  registerSW() {
+    if (typeof window === 'undefined' || !window.location) return;
+    const proto = window.location.protocol;
+    if (proto === 'file:') { this.swStatus = 'file'; return; }
+    if ((proto !== 'https:' && proto !== 'http:') || !('serviceWorker' in navigator)) { this.swStatus = 'unsupported'; return; }
+    this.swStatus = 'registering';
+    try {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (this._swUserReload && !this._swRefreshing) {
+          this._swRefreshing = true;
+          window.location.reload();
+        }
+      });
+      navigator.serviceWorker.register('./sw.js', { scope: './' }).then((reg) => {
+        this.swReg = reg;
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          this.showUpdateBanner(reg.waiting);
+        } else if (reg.active) {
+          this.swStatus = 'offline-ready';
+        }
+        reg.addEventListener('updatefound', () => {
+          const worker = reg.installing;
+          if (!worker) return;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed') {
+              if (navigator.serviceWorker.controller) this.showUpdateBanner(worker);
+              else this.swStatus = 'offline-ready';
+            }
+          });
+        });
+      }).catch(() => { this.swStatus = 'unsupported'; });
+    } catch (e) {
+      this.swStatus = 'unsupported';
+    }
+  },
+  showUpdateBanner(worker) {
+    if (worker) this.swWaiting = worker;
+    this.swStatus = 'update-available';
+    let el = $('#swUpdate');
+    if (!el && typeof document !== 'undefined' && document.body) {
+      el = document.createElement('div');
+      el.id = 'swUpdate'; el.className = 'sw-update';
+      el.setAttribute('role', 'status'); el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    if (!el) return;
+    el.innerHTML = '<span class="sw-txt"><b>Nieuwe versie beschikbaar</b><span>Vernieuw Het Spoor zodra het jou uitkomt — je voortgang blijft bewaard.</span></span>' +
+      '<span class="sw-acts"><button type="button" class="sw-btn sw-go" data-sw="reload">Vernieuwen</button><button type="button" class="sw-btn" data-sw="dismiss">Later</button></span>';
+    el.hidden = false;
+    el.onclick = (ev) => {
+      const b = ev.target.closest && ev.target.closest('button[data-sw]');
+      if (!b) return;
+      if (b.dataset.sw === 'reload') this.applyUpdate();
+      else this.dismissUpdateBanner();
+    };
+  },
+  dismissUpdateBanner() {
+    const el = $('#swUpdate');
+    if (el) el.hidden = true;
+  },
+  applyUpdate() {
+    this._swUserReload = true;
+    this.dismissUpdateBanner();
+    if (this.swWaiting && typeof this.swWaiting.postMessage === 'function') {
+      try { this.swWaiting.postMessage({ type: 'SKIP_WAITING' }); return; } catch (e) {}
+    }
+    window.location.reload();
+  },
+  swStatusLabel() {
+    if (this.swStatus === 'file') return 'Lokaal bestand (offline zonder installatie)';
+    if (this.swStatus === 'offline-ready') return 'Offline klaar (Service Worker actief)';
+    if (this.swStatus === 'update-available') return 'Nieuwe versie staat klaar';
+    if (this.swStatus === 'registering') return 'Offline cache wordt klaargezet…';
+    return 'Volledig offline speelbaar';
+  },
 
   async init() {
     window.addEventListener('error', (e) => this.toast('Fout: ' + (e.message || 'onbekend') + '. Meld dit met een schermafbeelding.', 8000));
     this.bind();
+    this.registerSW();
     $('#mClose').onclick = () => this.close();
     $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') this.close(); });
     const pc = $('#pClose'), pk = $('#peek');
@@ -184,8 +263,12 @@ const UI = {
     this.intro = parsed.intro && typeof parsed.intro === 'object' ? parsed.intro : saved ? Coach.done() : Coach.fresh();
     if (!parsed.intro) this.savePrefs();
     if (saved) {
-      try { this.load(Save.unpack(saved)); this.toast('Je verhaal is hervat.'); return; }
-      catch (e) { await Store.put('oldAuto', saved); this.oldRaw = saved; this.showStart(); this.toast(e.message, 12000); return; }
+      try {
+        const unpacked = Save.unpack(saved), mig = Save.lastMigration;
+        this.load(unpacked);
+        this.toast(mig ? 'Je verhaal is hervat (bijgewerkt van schema ' + mig.from + ' naar ' + mig.to + ').' : 'Je verhaal is hervat.');
+        return;
+      } catch (e) { await Store.put('oldAuto', saved); this.oldRaw = saved; this.showStart(); this.toast(e.message, 12000); return; }
     }
     this.showStart();
   },
@@ -1139,14 +1222,16 @@ const UI = {
         if (focusables.length) {
           const first = focusables[0], last = focusables[focusables.length - 1];
           if (e.shiftKey && (document.activeElement === first || !topDlg.contains(document.activeElement))) { e.preventDefault(); last.focus(); return; }
-          if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); return; }
+          if (!e.shiftKey && (document.activeElement === last || !topDlg.contains(document.activeElement))) { e.preventDefault(); first.focus(); return; }
         }
       }
       if (e.key === 'Escape') {
         if (peek && !peek.hidden) return this.closePeek();
         if (modal && !modal.hidden) return this.close();
         if (document.activeElement && document.activeElement.id === 'cardNote') { document.activeElement.blur(); return; }
-        if (this.sel || this.link || this.hot || this.stn || (this.sbSel && this.sbSel.length)) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.sbSel = []; this.render(); }
+        if (this.sel || this.link || this.hot || this.stn || (this.sbSel && this.sbSel.length)) { this.sel = null; this.link = null; this.hot = null; this.stn = null; this.sbSel = []; this.render(); return; }
+        const swu = $('#swUpdate');
+        if (swu && !swu.hidden) this.dismissUpdateBanner();
         return;
       }
       const radio = e.target.closest && e.target.closest('#app [role="radio"][data-ui="st-level"]');
@@ -1603,8 +1688,10 @@ const UI = {
   download(name, text) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' })); a.download = name; document.body.appendChild(a); a.click(); a.remove(); },
   async system(opt) {
     const s = this.s, b = this.btn, slots = [];
-    for (let i = 1; i <= 3; i++) { const raw = await Store.get('slot' + i); let m = null; try { m = raw ? JSON.parse(raw) : null; } catch (e) { m = null; }
-      slots.push(!m ? 'leeg' : m.schema !== APP.schema ? 'oude versie (schema ' + (m.schema || '?') + ')' : m.meta.title + ', ' + U.time(m.clock)); }
+    for (let i = 1; i <= 3; i++) {
+      const raw = await Store.get('slot' + i);
+      slots.push(Save.inspect(raw));
+    }
     const seg = (label, key, cur, opts) => '<div class="sys-row"><span class="sys-lbl">' + label + '</span><div class="row seg">' +
       opts.map((o) => b(o[1], { x: key, v: o[0] }, cur === o[0] ? 'on' : '')).join('') + '</div></div>';
     let h = '<h3>Weergave &amp; leesgemak</h3>' +
@@ -1613,8 +1700,8 @@ const UI = {
       seg('Lettertype', 'font', this.font, [['classic', 'Klassiek papier'], ['plain', 'Rustig leesfont']]) +
       seg('Geluid', 'sound', SFX.muted ? 'off' : 'on', [['on', 'Aan'], ['off', 'Uit']]) +
       '<p class="sys">Rustig leesfont vervangt cursieve en typemachine-lettertypen door een strak leeslettertype.</p>';
-    h += '<h3>Opslaan en laden</h3>' + slots.map((m, i) => '<div class="row"><span class="slot">Slot ' + (i + 1) + ': ' + U.esc(m) + '</span>' + b('Opslaan', { x: 'save', v: i + 1 }) + b('Laden', { x: 'load', v: i + 1 }, m === 'leeg' ? 'dim' : '') + '</div>').join('');
-    h += '<p class="sys">Er wordt na elke actie automatisch opgeslagen.</p><div class="row">' + b('Exporteer als bestand', { x: 'export' }) + '<label class="chip file">Importeer bestand<input type="file" accept="application/json,.json" id="imp" class="sr-only"></label></div>';
+    h += '<h3>Opslaan en laden</h3>' + slots.map((m, i) => '<div class="row"><span class="slot">Slot ' + (i + 1) + ': ' + U.esc(m.label) + '</span>' + b('Opslaan', { x: 'save', v: i + 1 }) + b('Laden', { x: 'load', v: i + 1 }, m.ok ? '' : 'dim') + '</div>').join('');
+    h += '<p class="sys">Er wordt na elke actie automatisch opgeslagen (schema ' + APP.schema + ', ondersteunt saves vanaf schema ' + Save.MIN_SCHEMA + ').</p><div class="row">' + b('Exporteer als bestand', { x: 'export' }) + '<label class="chip file">Importeer bestand<input type="file" accept="application/json,.json" id="imp" class="sr-only"></label></div>';
     if (this.oldRaw) h += '<p class="sys">Je vorige spel komt uit een oudere versie en kan niet meer geladen worden. Je kunt het bestand wel bewaren.</p><div class="row">' + b('Bewaar het oude bestand', { x: 'oldsave' }) + b('Vergeet het oude bestand', { x: 'oldforget' }, 'quiet') + '</div>';
     const LV_TXT = { makkelijk: 'Het bord trekt de draadjes voor je, verdachten met een bevestigd alibi vallen vanzelf af en opvallende plekken krijgen een vraagteken.',
       normaal: 'Je trekt de draadjes zelf. Een alibi valt pas af als je het controleert bij de persoon die het noemt. Opvallende plekken krijgen een vraagteken.',
@@ -1627,7 +1714,9 @@ const UI = {
     const isBase = Content.cur === Content.base;
     h += '<h3>Contentpakket</h3><p class="sys">Actief: <b>' + U.esc(Content.cur.name) + '</b>, ' + Content.count(Content.cur) + ' tekstregels. Een geïmporteerd pakket wordt samengevoegd met de standaard; wat ontbreekt, komt uit de standaard.</p>' +
       '<div class="row"><label class="chip file">Importeer contentpakket<input type="file" accept="application/json,.json" id="impContent" class="sr-only"></label>' + b('Exporteer standaardpakket', { x: 'cexport' }) + b('Herstel standaard', { x: 'creset' }, isBase ? 'dim' : '') + '</div>';
-    h += '<p class="sys">' + APP.title + ' ' + APP.version + ', seed: ' + U.esc(s.seed) + '. Volledig offline. Klik drie keer op de titel voor het debug-paneel.</p>';
+    h += '<p class="sys">' + APP.title + ' ' + APP.version + ', seed: ' + U.esc(s.seed) + '. ' + U.esc(this.swStatusLabel()) + '. Klik drie keer op de titel voor het debug-paneel.</p>';
+    if (this.swWaiting) h += '<div class="row">' + b('Update nu toepassen', { x: 'sw-reload' }, 'hot') + '</div>';
+    else if (this.swReg) h += '<div class="row">' + b('Controleer op updates', { x: 'sw-check' }) + '</div>';
     this.open('Systeem', h, async (e) => {
       const t = e.target.closest('button[data-x]'); if (!t) return;
       const x = t.dataset.x, v = t.dataset.v;
@@ -1636,7 +1725,14 @@ const UI = {
       if (x === 'font') { SFX.pin(); this.setFont(v); if (this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads(); return this.system({ keepScroll: true, focusSel: 'button[data-x="font"][data-v="' + v + '"]' }); }
       if (x === 'sound') { SFX.muted = (v === 'off'); this.savePrefs(); if (!SFX.muted) SFX.pin(); this.render(); return this.system({ keepScroll: true, focusSel: 'button[data-x="sound"][data-v="' + v + '"]' }); }
       if (x === 'save') { await Store.put('slot' + v, Save.pack(s)); this.toast('Opgeslagen in slot ' + v + '.'); this.system({ keepScroll: true }); }
-      if (x === 'load') { const raw = await Store.get('slot' + v); if (!raw) return; try { this.close(); this.load(Save.unpack(raw)); this.toast('Slot ' + v + ' geladen.'); } catch (err) { this.toast(err.message, 9000); } }
+      if (x === 'load') {
+        const raw = await Store.get('slot' + v); if (!raw) return;
+        try {
+          const unpacked = Save.unpack(raw), mig = Save.lastMigration;
+          this.close(); this.load(unpacked);
+          this.toast(mig ? 'Slot ' + v + ' geladen (bijgewerkt van schema ' + mig.from + ' naar ' + mig.to + ').' : 'Slot ' + v + ' geladen.');
+        } catch (err) { this.toast(err.message, 9000); }
+      }
       if (x === 'export') this.download('het-spoor-' + s.seed + '-dag' + s.clock.day + '.json', Save.pack(s));
       if (x === 'oldsave') this.download('het-spoor-oude-save.json', this.oldRaw);
       if (x === 'oldforget') { await Store.put('oldAuto', ''); this.oldRaw = null; this.system({ keepScroll: true }); }
@@ -1646,11 +1742,22 @@ const UI = {
       if (x === 'level') { SFX.pin(); this.setLevel(v); this.system({ keepScroll: true, focusSel: 'button[data-x="level"][data-v="' + v + '"]' }); }
       if (x === 'cexport') this.download('het-spoor-content-standaard.json', Content.rawText);
       if (x === 'creset') { if (Content.cur === Content.base) return; await Store.put('contentPack', ''); Content.reset(); this.toast('Standaardpakket hersteld.'); this.system({ keepScroll: true }); }
+      if (x === 'sw-reload') { this.applyUpdate(); }
+      if (x === 'sw-check' && this.swReg) {
+        try { await this.swReg.update(); this.toast(this.swWaiting ? 'Nieuwe versie staat klaar.' : 'Je gebruikt de nieuwste versie.'); }
+        catch (err) { this.toast('Geen verbinding — je kunt gewoon offline doorspelen.'); }
+      }
     }, opt);
     $('#impContent').onchange = (e) => { const file = e.target.files[0]; if (!file) return; const r = new FileReader();
       r.onload = async () => { const res = Content.importPack(r.result); if (res.ok) await Store.put('contentPack', r.result); this.contentReport(res); }; r.readAsText(file); };
     $('#imp').onchange = (e) => { const file = e.target.files[0]; if (!file) return; const r = new FileReader();
-      r.onload = () => { try { this.close(); this.load(Save.unpack(r.result)); this.toast('Savegame geïmporteerd.'); } catch (err) { this.toast(err.message, 9000); } }; r.readAsText(file); };
+      r.onload = () => {
+        try {
+          const unpacked = Save.unpack(r.result), mig = Save.lastMigration;
+          this.close(); this.load(unpacked);
+          this.toast(mig ? 'Savegame geïmporteerd (bijgewerkt van schema ' + mig.from + ' naar ' + mig.to + ').' : 'Savegame geïmporteerd.');
+        } catch (err) { this.toast(err.message, 9000); }
+      }; r.readAsText(file); };
   }
 };
 
