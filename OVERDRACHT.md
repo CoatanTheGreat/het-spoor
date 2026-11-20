@@ -1,6 +1,6 @@
-# Het Spoor, overdracht (stand v0.18.0)
+# Het Spoor, overdracht (stand v0.19.0)
 
-Dit document hoort bij `het-spoor` (`v0.18.0`). Het beschrijft wat er gebouwd is, waarom, en de huidige status van de roadmap.
+Dit document hoort bij `het-spoor` (`v0.19.0`). Het beschrijft wat er gebouwd is, waarom, en de huidige status van de roadmap.
 
 ## Werkwijze
 
@@ -17,15 +17,15 @@ Dit document hoort bij `het-spoor` (`v0.18.0`). Het beschrijft wat er gebouwd is
 
 | Bestand | Inhoud |
 |---|---|
-| content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen (incl. twists `dubbel`/`slachtofferliegt` en relatie-effecten) |
+| content.js | Alle tekstbanken (JSON), per tijdvak aan te vullen (incl. twists, relatie-effecten, snuffel-rem, stadspuls, verdachtendruk en 3-slags eindconfrontatie) |
 | lib.js | Plot-DNA, naamgeving, wereld en cast |
-| engine.js | Zaakopbouw (5 twists), regels, acties (o.a. `Act.confrontWrong`, `verzoen`, `giveWarmTip`, `hostileSpread`), bordnotities (`Pins`), klikbare verwijzingen (`Mentions`), hints (`Hints`), `Solver`, niet-alwetende `SimPlayer`, gestructureerde save-migratieketen (`Save.MIGRATIONS`) en 79 tests |
-| views.js | Inktlijn-/houtsnede-portretten (`Silhouette`), responsief zaakbord, verdachtenoverzicht, interactief Spoorboek (`Spoorboek`), kaartgenerator (`MapGen`), diepere tableau-scènes (`Tableau`), verhoor en coach |
-| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), "Aha!"-feedback (`#aha`), uitgebreide 0 KB WebAudio `SFX`, PWA/SW-registratie + update-banner (`#swUpdate`), bevestigingen, schermen, invoer, modals en debugpaneel (incl. `SimPlayer`) |
-| manifest.webmanifest, icon.svg, icon-maskable.svg, sw.js | PWA-manifest, 0 KB SVG-iconen (`any` + `maskable`) en offline-first geversionde Service Worker (`het-spoor-v0.18.0`) met veilige update-activatie |
-| tests/node-tests.mjs, tests/browser-a11y.mjs | Zero-dependency Node-testrunner (`Tests.run(30)`) en headless Chromium CDP browser-/a11y-teststraat |
+| engine.js | Zaakopbouw (5 twists), vloeiende dagklok & gespreide individuele roosters (`Schedule.atMin`, `World.openAtMin`), 2-staps voorwerpen (`World.glanceOf` + snuffel-rem), lekvrije verdachtendruk (`Living`), live 3-slags eindconfrontatie (`Act.startFinalConfront`/`stepFinalConfront`), bordnotities (`Pins`), verwijzingen (`Mentions`), hints (`Hints`), `Solver`, `SimPlayer`, save-migratieketen (`Save.MIGRATIONS` 8→9→10) en 84 tests |
+| views.js | Houtsnede-portretten (`Silhouette`), responsief zaakbord met punaise-naar-punaise draadjes (`Board.anchorPin`), verdachtenoverzicht, interactief Spoorboek (`Spoorboek`), kaartgenerator (`MapGen`), diepere tableau-scènes (`Tableau`), verhoor, live eindconfrontatie (`FinalConfrontView`) en coach |
+| ui.js | Startscherm, koude opening, gerichte DOM-deelrenders, spiekkaart (`#peek`), "Aha!"-feedback (`#aha`), 0 KB WebAudio `SFX`, PWA/SW-registratie + update-banner (`#swUpdate`), draadjes-laagkeuze, vloeiend 1 uur wachten, Zaakverslag (Wie/Waarom/Hoe) → live ontmaskering, modals en debugpaneel |
+| manifest.webmanifest, icon.svg, icon-maskable.svg, sw.js | PWA-manifest, 0 KB SVG-iconen (`any` + `maskable`) en offline-first geversionde Service Worker (`het-spoor-v0.19.0`) met veilige update-activatie |
+| tests/node-tests.mjs, tests/browser-a11y.mjs | Zero-dependency Node-testrunner (`Tests.run(30)`, 84 tests) en headless Chromium CDP browser-/a11y-teststraat (23 checks) |
 
-Opslag gebeurt via IndexedDB, met schema 9 (`APP.schema = 9`, `Save.MIN_SCHEMA = 8`). Via de gestructureerde migratieketen `Save.MIGRATIONS` (o.a. stap `8 → 9`) worden alle saves uit v0.8.0 tot en met v0.17.0 (schema 8) automatisch en deterministisch bijgewerkt naar schema 9 zonder verlies van voortgang of valse "Nieuw"-badges: oude koppelingen (`player.links`) worden omgezet naar draadjes, en ontbrekende velden (`clock.min`, `pos`, `play.heardOf`, `play.heardOfLoc`, `player.archive`, `player.marks`, `player.notes`, `player.seen`, `player.seenJournal`, `play.knownSched`, `play.warmTip`, `play.hostileSpread`) krijgen schone standaarden. Te oude bestanden (`schema < 8`), toekomstige bestanden (`schema > 9`) en ongeldige/corrupte JSON-bestanden worden geweigerd met duidelijke Nederlandse foutmeldingen. De uitlegstatus staat in de voorkeuren (`prefs.intro`), niet in de save.
+Opslag gebeurt via IndexedDB, met schema 10 (`APP.schema = 10`, `Save.MIN_SCHEMA = 8`). Via de gestructureerde migratieketen `Save.MIGRATIONS` (`8 → 9 → 10` en `9 → 10`) worden alle saves uit v0.8.0 tot en met v0.18.0 automatisch en deterministisch bijgewerkt naar schema 10 zonder verlies van voortgang of valse "Nieuw"-badges: stap `8 → 9` normaliseert oude koppelingen/klok/notities/geziene kaarten en stap `9 → 10` voegt deterministische `scheduleShift`, `play.pressure`, `play.divert` en `play.finalConfront` toe. Te oude bestanden (`schema < 8`), toekomstige bestanden (`schema > 10`) en ongeldige/corrupte JSON-bestanden worden geweigerd met duidelijke Nederlandse foutmeldingen. De uitlegstatus en draadjeslaag staan in de voorkeuren (`prefs.intro`, `prefs.threadLayer`), niet in de save.
 
 ## Wat er per fase gebouwd is
 
@@ -248,18 +248,44 @@ Opslag gebeurt via IndexedDB, met schema 9 (`APP.schema = 9`, `Save.MIN_SCHEMA =
   - 100% zero-dependency reproduceerbare scripts zonder verplichte buildstap (pure Node.js + lokaal geïnstalleerde Chromium/Chrome over Chrome DevTools Protocol).
   - Dekking van `file://`-compatibiliteit, PWA-manifest & SVG-iconen, Service Worker registratie/precache/`GET_VERSION`, echt offline herladen via SW-cache, `#swUpdate`-banner, toetsenbordnavigatie (skiplink, radiogroup-pijltjes, Enter-kaartselectie), ARIA & focus-traps (`#modal` Tab/Shift+Tab/Escape + focusterugkeer, `#peek` bovenop `#modal`), programmatische WCAG AA kleurcontrastchecks (licht én donker met alpha-compositing), 4 responsieve viewports (`1280×820`, `768×1024`, `640×420`, `390×844`) + *Extra groot* / *Rustig leesfont*, en een volledige gameplay- & schema-8→9-migratieflow met 0 runtime-/console-/netwerkfouten.
 
-## Meetwaarden (stand v0.18.0)
+### Fase I, v0.19.0: De Levende Stad & De Ontmaskering
+- **Vloeiende dagklok & levende stad (`World.openAtMin`, `Schedule.buildShifts`, `Schedule.atMin`, `Clock.flowed`, `Living.pulse`, `Act.wait(s, 60)`):**
+  - Starre 3-bloks sprongen om exact 12:00 en 17:00 vervangen door echte minuut-nauwkeurige openingstijden (`HH:00–HH:00`), individueel gespreide wisseltijden per persoon (`10:45–13:15` en `15:45–18:30`, 100% lekvrij en nooit op een gesloten plek), vloeiend **Wacht 1 uur** (`Act.wait(s, 60)`), en subtiele stadspuls-/geruchtmeldingen bij rustige uurovergangen.
+  - Kaart, stationdetail, spiekkaart, bezoekklok (`open tot HH:MM`) en Coach werken doorlopend met de echte tijd.
+- **Helder "Wie / Waarom / Hoe" + 2-staps voorwerpen tegen alles-aanklikken (`Evidence.roleInfo`, `World.glanceOf`, `Act.examine`, `UI.dossier`):**
+  - Elke aanwijzing krijgt een heldere Nederlandstalige rol (*Waarom · Motief*, *Hoe · Werkwijze / alibi*, *Aanwijzing*) op bordkaarten, detailpaneel, bewijswaaier en Zaakverslag.
+  - Tikken op een voorwerp geeft eerst een **gratis eerste indruk** (`World.glanceOf`, 0 min) met waarschuwing als een bewoner in eigen ruimte meekijkt; pas daarna kiest de speler bewust voor **Grondig onderzoeken** (15 min). Herhaald leeg snuffelen bij een bewoner wekt argwaan en druk (`obj.snoop`).
+  - Op *Normaal* en *Moeilijk* toont het Zaakverslag bij **2. Waarom** en **3. Hoe** alle gevonden sporen (zonder vooraf te filteren), zodat de speler zelf motief en werkwijze onderscheidt; op *Makkelijk* blijft de helpende filtering actief.
+- **Draadjes zichtbaar boven kaarten (punaise-naar-punaise) met laagkeuze (`Board.anchorPin`, `UI.threadLayer`, `style.css`):**
+  - Draadjes ankeren aan de rode punaise bovenaan elke kaart en liggen standaard **bovenop** de kaarten (`z-index: 3`, `pointer-events: none`) met rustige standaard-transparantie, helder contrast-halo (`.th-halo`) en volle nadruk bij kaartselectie of in draadjes-modus.
+  - Toolbar-knop **Draadjes: boven / achter / uit** op het Zaakbord (bewaard in `prefs.threadLayer`).
+- **Live 3-slags Eindconfrontatie "De Ontmaskering" (`Act.startFinalConfront`, `Act.stepFinalConfront`, `FinalConfrontView`, `content.js`):**
+  - Het ondertekende Zaakverslag opent geen droge melding meer, maar start een live confrontatie in drie slagen tegenover de beschuldigde (*1. Wie* → *2. Waarom* → *3. Hoe*) met wisselende portretexpressie en voortgangslijst.
+  - Bij een kloppend verslag: dramatische **overgave + heldenmoment** (`final.surrender` + `final.hero`) gevolgd door het volledige eindverslag en epiloog.
+  - Bij een zwakke schakel: gerichte in-character weerlegging (`final.refute.{person,motive,method,mismatch}`) die aangeeft welke schakel wankelt zonder de echte dader te lekken, waarna het verslag direct aanpasbaar is.
+- **Lekvrije verdachtendruk "In het vizier" (`Living` in `engine.js`, `views.js`, `ui.js`):**
+  - Druk (`s.play.pressure`) stijgt uitsluitend door waarneembare speleracties (alibi vragen/controleren, snuffelen in iemands ruimte, scherpe toon, confrontaties) voor **elke** verdachte gelijk — leest nooit `truth.culpritId`.
+  - Bij verhoogde druk (`>= 30` / `>= 55`): zichtbare badge (*oogt gespannen* / *onder druk*) op bordkaart, detailpaneel, tableau-popup en verhoorscherm, scherpere houding in het portret, gespannen gespreksopening (`pressure.cue`), en vanaf `>= 45` een eenmalige uitwijk-routine (`Living.maybeDivert`) met gerucht op de oude plek (`pressure.rumor`).
+- **Schema 10 (`Save.MIGRATIONS[9]`):** automatische meerstaps-migratie `8 → 9 → 10` en `9 → 10` met behoud van alle oudere saves uit v0.8.0–v0.18.0, en PWA Service Worker bijgewerkt naar `het-spoor-v0.19.0`.
 
-- **79 tests, alle groen in Node (`node tests/node-tests.mjs 30`)** (76 bestaand + 3 nieuwe Fase H-regressietests voor `Save.MIGRATIONS` schema 8 → 9 achterwaartse compatibiliteit, meerstaps-keten + weigering van te oude/toekomstige/corrupte bestanden, en lekvrijheid + `Game.check` na migratie).
-- **21/21 geautomatiseerde headless Chromium browser-/a11y-checks groen (`node tests/browser-a11y.mjs`)** (0 runtime-, console- en netwerkfouten op zowel HTTP als `file://`): `file://`-veiligheid, PWA-manifest & SVG-iconen, Service Worker precache (`het-spoor-v0.18.0`, 11 bestanden) + `GET_VERSION`, echt offline herladen vanuit SW-cache, `#swUpdate`-banner contrast/Escape, startscherm toetsenbord + WCAG AA contrast (licht/donker), koude opening → logiesbezoek + onderzoek + verhoor (incl. progressbars & contrast), Zaakbord Enter-selectie + `#cardNote`-focusbehoud + markering + draadje + contrast, Verdachtenoverzicht + Spoorboek + Spoorkaart, `#modal` Tab/Shift+Tab focus-trap + focusterugkeer + contrast, `#peek` boven `#modal` met Escape-prioriteit, Save-migratie schema 8 → 9 via *Systeem*-slot, Zaakverslag, en 0 horizontale overloop op `1280×820`, `768×1024`, `640×420` en `390×844` (incl. `xlarge` + `plain`).
-- Roadmap-status (alle fasen A–H afgerond):
+## Meetwaarden (stand v0.19.0)
+
+- **84 tests, alle groen in Node (`node tests/node-tests.mjs 30`)** (79 bestaand + 5 nieuwe Fase I-regressietests voor vloeiende klok/gespreide roosters over 30 seeds, 2-staps voorwerpen & snuffel-rem, 100% lekvrije verdachtendruk/uitwijk-routine/gerucht, 3-slags eindconfrontatie met gerichte weerlegging + overgave/heldenmoment, en schema `9 → 10` / `8 → 9 → 10` migratie).
+- **23/23 geautomatiseerde headless Chromium browser-/a11y-checks groen (`node tests/browser-a11y.mjs`)** (0 runtime-, console- en netwerkfouten op zowel HTTP als `file://`): alle 21 Fase H-checks (bijgewerkt voor SW `het-spoor-v0.19.0`, schema `8 → 10`, gratis 2-staps eerste indruk en `1. Wie / 2. Waarom / 3. Hoe`) + 2 nieuwe Fase I-checks voor punaise-naar-punaise draadjes boven kaarten (`z-index: 3 > 2` + laagkeuze `over/under/off`) & vloeiend `Wacht 1 uur`, en de live 3-slags eindconfrontatie (*refuted* + *surrender/hero* + eindverslag + WCAG AA contrast licht & donker).
+- Roadmap-status (fasen A–I afgerond):
   - **Fase A (`v0.12.1`)**: klaar (commit `0b33703`)
   - **Fase B (`v0.13.0`) + kern Fase C**: klaar (commit `76c4556`)
   - **Fase C (rest) + Fase D (`v0.14.0`)**: klaar (commit `aaf3ab6`)
   - **Fase E (`v0.15.0`)**: klaar (commit `aeb6ecf`)
   - **Fase F (`v0.16.0`)**: klaar (commit `2e16ffb`)
   - **Fase G (`v0.17.0`)**: klaar (commit `e362c86`)
-  - **Fase H (`v0.18.0`)**: klaar (PWA, `Save.MIGRATIONS` en zero-dependency browser/a11y-teststraat)
+  - **Fase H (`v0.18.0`)**: klaar (commit `0388ee1`)
+  - **Fase I (`v0.19.0`)**: klaar (De Levende Stad & De Ontmaskering)
+
+## Meetwaarden (stand v0.18.0)
+
+- **79 tests, alle groen in Node (`node tests/node-tests.mjs 30`)** (76 bestaand + 3 nieuwe Fase H-regressietests voor `Save.MIGRATIONS` schema 8 → 9 achterwaartse compatibiliteit, meerstaps-keten + weigering van te oude/toekomstige/corrupte bestanden, en lekvrijheid + `Game.check` na migratie).
+- **21/21 geautomatiseerde headless Chromium browser-/a11y-checks groen (`node tests/browser-a11y.mjs`)** (0 runtime-, console- en netwerkfouten op zowel HTTP als `file://`).
 
 ## Meetwaarden (stand v0.17.0)
 
@@ -315,4 +341,4 @@ Opslag gebeurt via IndexedDB, met schema 9 (`APP.schema = 9`, `Save.MIN_SCHEMA =
 
 ## Wat nog openstaat
 
-Alle geplande roadmap-fasen (**A t/m H**, `v0.12.1` t/m `v0.18.0`) zijn afgerond. Eventuele vervolgstappen zijn vrije uitbreidingen (zoals extra contentpakketten per tijdvak of aanvullende spelmodi), bewaakt door `node tests/node-tests.mjs 30` en `node tests/browser-a11y.mjs`.
+Alle geplande fasen (**A t/m I**, `v0.12.1` t/m `v0.19.0`) zijn afgerond. Eventuele vervolgstappen zijn vrije uitbreidingen (zoals extra contentpakketten per tijdvak of aanvullende spelmodi), bewaakt door `node tests/node-tests.mjs 30` (84 tests) en `node tests/browser-a11y.mjs` (23 checks).

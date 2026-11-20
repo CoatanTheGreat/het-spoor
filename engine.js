@@ -1,5 +1,5 @@
 'use strict';
-const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.18.0', schema: 9 });
+const APP = Object.freeze({ title: 'Het Spoor', version: 'v0.19.0', schema: 10 });
 
 /* ---------------- Config ---------------- */
 const OPEN_HOURS = { herberg: [6, 24], huis: [8, 21], markt: [8, 18], kantoor: [8, 18], archief: [9, 17], werkplaats: [7, 18], haven: [0, 24], poort: [0, 24], plein: [0, 24], park: [0, 24], straat: [0, 24] };
@@ -209,6 +209,15 @@ const Content = {
     def('rel.warmTip.sched', 'speech', 3, ALL_VARS.concat(['target', 'part', 'place']), ['target', 'part', 'place']);
     def('rel.warmTip.loc', 'speech', 3, ALL_VARS.concat(['place']), ['place']);
     def('rel.hostileSpread', 'narr', 2, ALL_VARS.concat(['other', 'loc']), ['other']);
+    def('obj.snoop', 'raw', 2, ALL_VARS);
+    def('living.pulse', 'narr', 3, BASE);
+    def('pressure.cue', 'speech', 3, ALL_VARS);
+    def('pressure.rumor', 'narr', 2, ALL_VARS.concat(['place']), ['place']);
+    def('final.deny', 'raw', 2, ALL_VARS);
+    def('final.motive', 'raw', 2, ALL_VARS.concat(['title']), ['title']);
+    def('final.surrender', 'raw', 2, ALL_VARS.concat(['title']), ['title']);
+    def('final.hero', 'narr', 2, ALL_VARS);
+    ['person', 'motive', 'method', 'mismatch'].forEach((k) => def('final.refute.' + k, 'raw', 1, ALL_VARS.concat(['title'])));
     def('crowd.sched', 'speech', 2, BASE.concat(['name', 'part']), ['name', 'part']);
     Object.keys(TPL_OBJECTS).forEach((t) => def('obj.nothing.' + t, 'narr', 4, BASE, [], true));
     def('drink', 'label', 2, [], [], true);
@@ -801,6 +810,13 @@ const Evidence = {
     const map = {}; evs.forEach((e) => { map[e.id] = e; }); const state = {};
     const visit = (id) => { if (state[id] === 1) return false; if (state[id] === 2) return true; state[id] = 1; const e = map[id]; if (!e) return false; for (const r of e.requires) if (!visit(r)) return false; state[id] = 2; return true; };
     return evs.every((e) => visit(e.id));
+  },
+  // v0.19.0 (Fase I): plain-language explanation of what an evidence piece proves (Wie / Waarom / Hoe)
+  roleInfo(e) {
+    if (!e) return { short: 'Spoor', pillar: 'Aanwijzing', help: 'Helpt je verder in het onderzoek.' };
+    if (e.slot === 'motive') return { short: 'Waarom · Motief', pillar: 'Waarom (Motief)', help: 'Laat zien waarom iemand een drijfveer had voor deze daad.' };
+    if (e.slot === 'method') return { short: 'Hoe · Werkwijze / alibi', pillar: 'Hoe (Werkwijze & middel)', help: 'Laat zien hoe de daad is uitgevoerd, welk middel is gebruikt, of prikt een vals alibi door.' };
+    return { short: 'Aanwijzing', pillar: 'Tussenspoor', help: 'Verwijst naar een persoon, plek of vervolgspoor.' };
   }
 };
 
@@ -928,10 +944,39 @@ const World = {
   here: (s) => (s.visit ? World.loc(s, s.visit.locId) : null),
   isOpen: (loc, hour) => hour >= loc.open[0] && hour < loc.open[1],
   openAt: (loc, part) => part >= 0 && part < DAY.parts && World.isOpen(loc, PART_HOUR[part]),
+  // v0.19.0 (Fase I): true minute-accurate opening check (no rigid 3-slot boundaries)
+  openAtMin: (loc, min) => !!loc && min >= 0 && min < NIGHT && min >= loc.open[0] * 60 && min < loc.open[1] * 60,
+  closeMin: (loc) => !loc ? NIGHT : Math.min(NIGHT, loc.open[1] * 60),
   npc: (s, id) => s.cast.find((n) => n.id === id),
-  present: (s, loc) => { loc = loc || World.here(s); return loc ? s.cast.filter((n) => Schedule.at(s, n.id, s.clock.day, s.clock.part) === loc.id) : []; },
-  crowdHere: (s, loc) => { loc = loc || World.here(s); return loc ? s.crowd.filter((c) => Schedule.at(s, c.id, s.clock.day, s.clock.part) === loc.id) : []; },
+  present: (s, loc) => { loc = loc || World.here(s); const m = Clock.norm(s); return loc && m < NIGHT ? s.cast.filter((n) => Schedule.atMin(s, n.id, s.clock.day, m) === loc.id) : []; },
+  crowdHere: (s, loc) => { loc = loc || World.here(s); const m = Clock.norm(s); return loc && m < NIGHT ? s.crowd.filter((c) => Schedule.atMin(s, c.id, s.clock.day, m) === loc.id) : []; },
   rng: (s, tag) => RNG.make(s.seed + '|turn|' + s.turn + '|' + tag),
+  // v0.19.0 (Fase I): free first impression on an object before spending time to search it (100% leak-free)
+  glanceOf(s, loc, obj) {
+    if (!loc || !obj) return { text: 'Van dichtbij bekijken.', watcher: null };
+    const clue = s.evidence.find((e) => e.source.objectId === obj.id && s.play.found[e.id]);
+    if (clue) return { text: 'Gevonden: ' + clue.title + ' (' + Evidence.roleInfo(clue).short + ').', watcher: null, done: true };
+    if (s.play.early && s.play.early[obj.id]) return { text: 'Opvallend (?): hier viel eerder iets op — onderzoek opnieuw zodra je een nieuwe aanwijzing hebt.', watcher: null, early: true };
+    if (s.play.examined && s.play.examined[obj.id]) return { text: 'Hier heb je al grondig gekeken.', watcher: null, done: true };
+    const r = RNG.make(s.seed + '|glance|' + obj.id);
+    const byProp = {
+      desk: ['Een werktafel met papieren en losse aantekeningen langs de rand.', 'Op het blad liggen sporen van recent gebruik; een lade staat op een kier.'],
+      shelf: ['Rijen mappen, registers en oudere stukken staan dicht opeen.', 'Tussen de nette rijen steekt een gevouwen stuk papier iets uit.'],
+      box: ['Een stevig kistje met krassen rond het sluitwerk.', 'Het deksel sluit stroef; dit wordt vaker geopend dan het lijkt.'],
+      coat: ['Een kapstok met jassen en zakken die iets kunnen bevatten.', 'Een jas hangt losjes over een haak, met een licht gevulde zijzak.'],
+      rack: ['Gereedschap en spullen hangen op volgorde, één plek oogt net verschoven.', 'Een rek vol gebruiksvoorwerpen met duidelijke sporen van de afgelopen dag.'],
+      bench: ['Een zitplaats waar mensen vaak even blijven hangen of iets achterlaten.', 'Langs de leuning en eronder ligt van alles wat voorbijgangers vergeten.'],
+      stall: ['Een drukke kraam waar brieven, waren en briefjes van hand tot hand gaan.', 'Onder de toonbank liggen bonnetjes en pakjes klaar voor vandaag.'],
+      table: ['Op tafel staan bekers en losse briefjes van recente bezoekers.', 'Een tafel in het zicht van de ruimte, met sporen van een haastig vertrek.'],
+      post: ['Een vaste ontmoetingsplek waar berichten en spullen vaak even blijven liggen.', 'In de buurt van deze plek blijven geregeld kleine aanwijzingen achter.'],
+      crate: ['Kisten en pakketten met labels, touw en losse vervoersbriefjes.', 'Een stapel kisten waarvan de bovenste nog niet lang geleden is verplaatst.'],
+      gate: ['Langs de doorgang laten reizigers en boodschappers sporen na.', 'Bij de doorgang hangt een mededelingenbord met recente krabbels.'],
+      default: ['Een detail in ' + loc.name + ' dat je op eigen oordeel kunt doorzoeken.', 'Van een afstandje oogt dit alledaags, maar dichterbij kan het meer vertellen.']
+    };
+    const pool = byProp[obj.prop] || byProp.default;
+    const watcher = World.present(s, loc).filter((n) => n.locationId === loc.id && People.known(s, n.id)).sort(byNameE)[0] || null;
+    return { text: r.pick(pool), watcher: watcher, done: false };
+  },
   // v0.8.0 (nieuw B): what a non-evidence object yields; null means nothing (the caller tells the 'nothing' line)
   yieldOf(s, loc, obj) {
     const y = obj.yield || { k: 'none' }, r = RNG.make(s.seed + '|yield|' + obj.id + '|' + s.clock.day), name = Rnd.cap(obj.name), tag = 'y|' + obj.id;
@@ -972,33 +1017,50 @@ const Clock = {
   norm(s) { const c = s.clock; if (typeof c.min !== 'number' || this.partOf(c.min) !== c.part) c.min = c.part >= DAY.parts ? NIGHT : PART_START[c.part]; return c.min; },
   left: (s) => NIGHT - Clock.norm(s),
   partEnd: (part) => part < 2 ? PART_START[part + 1] : NIGHT,
-  // time passes; crossing into a new part moves people, can close the place you are in, and can make it night
+  // v0.19.0 (Fase I): fluid time passage — people move on their own staggered routines and locations close on their true closing hour
   spend(s, mins) {
-    const c = s.clock, before = (this.norm(s), c.part);
-    c.min = Math.min(NIGHT, c.min + Math.max(0, mins)); c.part = this.partOf(c.min);
-    if (c.part !== before) this.turned(s, before);
+    const c = s.clock, minBefore = this.norm(s), partBefore = c.part;
+    c.min = Math.min(NIGHT, minBefore + Math.max(0, mins));
+    c.part = this.partOf(c.min);
+    if (c.min !== minBefore) this.flowed(s, minBefore, c.min, partBefore);
   },
-  turned(s, before) {
-    const c = s.clock, now = c.part;
-    if (now >= DAY.parts) Log.sys(s, 'Het is tien uur \'s avonds. Sluit de dag af om morgen verder te gaan.');
-    else Log.sys(s, 'Het is ' + PARTS[now] + ' geworden.');
+  flowed(s, minBefore, minAfter, partBefore) {
+    const c = s.clock, nowPart = c.part;
+    if (nowPart >= DAY.parts && partBefore < DAY.parts) {
+      Log.sys(s, 'Het is tien uur \'s avonds. Sluit de dag af om morgen verder te gaan.');
+    } else if (nowPart !== partBefore) {
+      Log.sys(s, 'Het is ' + U.hm(minAfter) + ' (' + PARTS[nowPart] + ').');
+    }
     if (!s.visit) return;
     const loc = World.here(s);
-    if (now >= DAY.parts || !World.openAt(loc, now)) { if (s.visit.conv) s.visit.closing = true; else this.shut(s); return; }
-    const at = (n, part) => Schedule.at(s, n.id, c.day, part) === loc.id, all = s.cast.concat(s.crowd), name = (n) => People.known(s, n.id) ? U.first(n) : null;
-    const gone = all.filter((n) => at(n, before) && !at(n, now) && n.id !== s.visit.conv), come = all.filter((n) => !at(n, before) && at(n, now));
-    const say = (list, verb1, verbN) => { if (!list.length) return null; const k = list.map(name).filter(Boolean).sort(), u = list.length - k.length;
-      const parts = k.concat(u ? [u === 1 ? 'iemand die je niet kent' : u + ' onbekenden'] : []); const w = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' en ' + parts[parts.length - 1] : parts[0];
-      return Rnd.cap(w) + ' ' + (list.length === 1 ? verb1 : verbN) + '.'; };
+    if (minAfter >= NIGHT || !World.openAtMin(loc, minAfter)) {
+      if (s.visit.conv) s.visit.closing = true; else this.shut(s);
+      return;
+    }
+    const at = (n, m) => Schedule.atMin(s, n.id, c.day, m) === loc.id;
+    const all = s.cast.concat(s.crowd), name = (n) => People.known(s, n.id) ? U.first(n) : null;
+    const gone = all.filter((n) => at(n, minBefore) && !at(n, minAfter) && n.id !== s.visit.conv);
+    const come = all.filter((n) => !at(n, minBefore) && at(n, minAfter));
+    const say = (list, verb1, verbN) => {
+      if (!list.length) return null;
+      const k = list.map(name).filter(Boolean).sort(), u = list.length - k.length;
+      const parts = k.concat(u ? [u === 1 ? 'iemand die je niet kent' : u + ' onbekenden'] : []);
+      const w = parts.length > 1 ? parts.slice(0, -1).join(', ') + ' en ' + parts[parts.length - 1] : parts[0];
+      return Rnd.cap(w) + ' ' + (list.length === 1 ? verb1 : verbN) + '.';
+    };
     const lines = [say(gone, 'vertrekt', 'vertrekken'), say(come, 'komt binnen', 'komen binnen')].filter(Boolean);
     if (lines.length) Log.narr(s, lines.join(' '));
+    // subtle living-city pulse when crossing an hour boundary during a visit (no spam)
+    if (Math.floor(minAfter / 60) > Math.floor(minBefore / 60) && !lines.length && !s.visit.conv) {
+      Living.pulse(s);
+    }
   },
   shut(s) {
     const loc = World.here(s); if (!loc) return;
     Log.sys(s, s.clock.part >= DAY.parts ? 'Het is laat. Je verlaat ' + loc.name + '.' : loc.name + ' gaat dicht. Je staat weer buiten.');
     s.visit = null;
   },
-  // to the start of the next part (waiting, or a false accusation)
+  // to the start of the next part (kept for backward compatibility / SimPlayer / tests)
   nextPart(s) {
     if (s.visit) { Act.talkEnd(s); s.visit = null; }
     if (this.norm(s), s.clock.part >= DAY.parts) return;
@@ -1007,6 +1069,7 @@ const Clock = {
   night(s) {
     const c = s.clock, closedDay = c.day;
     s.visit = null; c.day++; c.part = 0; c.min = PART_START[0]; s.pos = s.startLoc;
+    if (s.play && s.play.divert) s.play.divert = {};
     Log.narr(s, Text.say(s, 'night.sleep', Text.vars(s), 'night'));
     // v0.6.4 (Voorstel 5): Hoofdstuk-avondoverpeinzing + tikkende klok uit het Plot-DNA
     const hooks = (s.meta && s.meta.actHooks) || [];
@@ -1023,9 +1086,10 @@ const Clock = {
   elapsed: (c) => (c.day - 1) * DAY.parts + Math.min(c.part, DAY.parts)
 };
 
-/* ---------------- Schedule: per person (cast and crowd), per day and part, a place that is open then ----------------
-   Own RNG stream per person (seed|sched|id), so the world itself never shifts. Rules: never at a closed place;
-   home most of the time; a fixed second place (preferably a social one); at home at least once every day. */
+/* ---------------- Schedule: staggered individual daily routines (v0.19.0) ----------------
+   Each person has their own deterministic routine anchors (seed|sched|id) AND staggered shift minutes
+   (seed|shift|id) so the town flows continuously instead of jumping synchronously at 12:00 and 17:00.
+   Guarantees: never at a closed place at any minute; at home at least once every day; 100% leak-free. */
 const SOCIAL_TPL = ['herberg', 'plein', 'markt', 'park'];
 const Schedule = {
   build(s) {
@@ -1048,7 +1112,49 @@ const Schedule = {
     });
     return out;
   },
+  // v0.19.0 (Fase I): per-person staggered transition times [midShift, eveShift] in minutes (15-min grid, leak-free)
+  buildShifts(s) {
+    const out = {};
+    s.cast.concat(s.crowd).forEach((n) => {
+      const r = RNG.make(s.seed + '|shift|' + n.id);
+      const t1 = 645 + r.int(11) * 15;  // 10:45 .. 13:15
+      const t2 = 945 + r.int(12) * 15;  // 15:45 .. 18:30
+      out[n.id] = [t1, t2];
+    });
+    return out;
+  },
+  shiftsOf(s, id) {
+    if (s.scheduleShift && s.scheduleShift[id]) return s.scheduleShift[id];
+    const r = RNG.make(s.seed + '|shift|' + id);
+    return [645 + r.int(11) * 15, 945 + r.int(12) * 15];
+  },
   at(s, id, day, part) { if (part < 0 || part >= DAY.parts) return null; const rows = s.schedule[id]; return rows ? rows[(day - 1) % SCHED_DAYS][part] : null; },
+  // v0.19.0: continuous location lookup by exact clock minute, honoring active pressure diversions and true opening hours
+  atMin(s, id, day, min) {
+    if (typeof min !== 'number' || min < 0 || min >= NIGHT) return null;
+    const dv = s.play && s.play.divert && s.play.divert[id];
+    if (dv && dv.day === day && min >= dv.from && min < dv.until) {
+      const dl = World.loc(s, dv.locId);
+      if (dl && World.openAtMin(dl, min)) return dl.id;
+    }
+    const rows = s.schedule && s.schedule[id];
+    if (!rows) return null;
+    const row = rows[(day - 1) % SCHED_DAYS];
+    const sh = this.shiftsOf(s, id);
+    const slot = min < sh[0] ? 0 : min < sh[1] ? 1 : 2;
+    const primary = World.loc(s, row[slot]);
+    if (primary && World.openAtMin(primary, min)) return primary.id;
+    // Fallback if this slot's place hasn't opened yet (e.g. archief before 09:00) or just closed (e.g. kantoor after 18:00)
+    for (let k = 0; k < 3; k++) {
+      const alt = World.loc(s, row[k]);
+      if (alt && World.openAtMin(alt, min)) return alt.id;
+    }
+    const person = s.cast.find((x) => x.id === id) || s.crowd.find((x) => x.id === id);
+    const home = person && World.loc(s, person.locationId);
+    if (home && World.openAtMin(home, min)) return home.id;
+    const anyOpen = s.world.locations.find((l) => World.openAtMin(l, min));
+    return anyOpen ? anyOpen.id : row[slot];
+  },
   check(s) {
     const e = [];
     s.cast.concat(s.crowd).forEach((n) => {
@@ -1059,6 +1165,78 @@ const Schedule = {
       });
     });
     return e;
+  }
+};
+
+/* ---------------- Living City & Suspect Pressure (v0.19.0, Fase I) ----------------
+   100% leak-free: pressure rises strictly from observable player actions (alibi questioning, alibi checks,
+   snooping in someone's space, sharp confrontations) and applies uniformly to EVERY core suspect under heat —
+   never reading truth.culpritId. High pressure makes a suspect visibly tense, changes their opening line,
+   and can cause them to slip away from their normal routine (e.g. to check in with their alibi companion). */
+const Living = {
+  pressure: (s, id) => (s && s.play && s.play.pressure && s.play.pressure[id]) || 0,
+  pressureLevel(s, id) {
+    const p = this.pressure(s, id);
+    return p >= 55 ? 'high' : p >= 30 ? 'tense' : 'calm';
+  },
+  pressureLabel(s, id) {
+    const lv = this.pressureLevel(s, id);
+    return lv === 'high' ? 'onder druk' : lv === 'tense' ? 'oogt gespannen' : '';
+  },
+  addPressure(s, id, delta) {
+    if (!s || !s.play || !id || !World.npc(s, id)) return 0;
+    const map = s.play.pressure = s.play.pressure || {};
+    const prev = map[id] || 0;
+    const next = Math.max(0, Math.min(100, prev + delta));
+    map[id] = next;
+    // Once a person crosses high heat (>= 45) while not currently in conversation with the player,
+    // they may deviate from their normal routine for 90 minutes (at most once per day, leak-free).
+    if (next >= 45 && prev < 45 && (!s.visit || s.visit.conv !== id)) {
+      this.maybeDivert(s, id);
+    }
+    return next;
+  },
+  maybeDivert(s, id) {
+    const npc = World.npc(s, id); if (!npc) return null;
+    const now = Clock.norm(s);
+    if (now >= NIGHT - 30) return null;
+    const dvMap = s.play.divert = s.play.divert || {};
+    if (dvMap[id] && dvMap[id].day === s.clock.day) return null;
+    const curLocId = Schedule.atMin(s, id, s.clock.day, now);
+    // Pick a plausible open destination different from their current location:
+    // prefer their alibi companion's current location (if open), else a calm/social open place (never reads truth.culpritId).
+    const al = s.alibis && s.alibis[id];
+    const compLocId = al && al.withId ? Schedule.atMin(s, al.withId, s.clock.day, now) : null;
+    const candidates = [];
+    if (compLocId && compLocId !== curLocId && World.openAtMin(World.loc(s, compLocId), now)) candidates.push(compLocId);
+    s.world.locations.filter((l) => l.id !== curLocId && World.openAtMin(l, now)).forEach((l) => {
+      if (candidates.indexOf(l.id) < 0) candidates.push(l.id);
+    });
+    if (!candidates.length) return null;
+    const targetId = candidates[0];
+    dvMap[id] = { day: s.clock.day, from: now, until: Math.min(NIGHT, now + 90), fromLocId: curLocId, locId: targetId, rumored: false };
+    return dvMap[id];
+  },
+  // Short living-city ambient beat or rumor about a pressured person who just slipped away from this location
+  pulse(s) {
+    if (!s || !s.visit || s.play.ended) return false;
+    const loc = World.here(s), now = Clock.norm(s);
+    if (!loc) return false;
+    const dvMap = s.play.divert || {};
+    const fled = Object.keys(dvMap).find((id) => {
+      const d = dvMap[id];
+      return d && !d.rumored && d.day === s.clock.day && d.fromLocId === loc.id && now >= d.from && now < d.until && s.play.met && s.play.met[id];
+    });
+    if (fled) {
+      const npc = World.npc(s, fled), dest = World.loc(s, dvMap[fled].locId);
+      if (npc && dest) {
+        dvMap[fled].rumored = true;
+        Log.narr(s, Text.say(s, 'pressure.rumor', Text.npcVars(s, npc, { place: dest.name }), 'prum|' + fled + '|' + s.clock.day));
+        return true;
+      }
+    }
+    Log.narr(s, Text.say(s, 'living.pulse', Text.vars(s), 'pulse|' + s.clock.day + '|' + Math.floor(now / 60)));
+    return true;
   }
 };
 
@@ -1325,32 +1503,43 @@ const Travel = {
     if (!a || !b || a === b) return 0; const M = this.map(s), p = M && M.pos[a], q = M && M.pos[b]; if (!p || !q) return 30;
     const d = Math.hypot(q.x - p.x, q.y - p.y); return d < 300 ? 15 : d < 620 ? 30 : 45;
   },
-  // what happens if you set off now: arrival time and whether the door is open then
+  // v0.19.0: what happens if you set off now — true arrival minute & true opening hour
   check(s, locId) {
     const loc = World.loc(s, locId), now = Clock.norm(s), walk = Travel.min(s, s.pos, locId), at = now + walk, part = Clock.partOf(at);
-    return { loc: loc, walk: walk, at: at, part: part, late: at >= NIGHT, open: !!loc && part < DAY.parts && World.openAt(loc, part), here: s.pos === locId };
+    return { loc: loc, walk: walk, at: at, part: part, late: at >= NIGHT, open: !!loc && at < NIGHT && World.openAtMin(loc, at), here: s.pos === locId };
   }
 };
 
-/* ---------------- Actions (the only place that changes game state) ----------------
-   v0.6.1: a visit costs one part of the day (paid on leaving); examining, talking and asking around inside a
-   visit cost nothing. One conversation per person per visit; every topic once per conversation. */
+/* ---------------- Actions (the only place that changes game state) ---------------- */
 const Act = {
   _done(s) { s.turn++; Rules.post(s); },
   _open(s, loc) {
-    s.visit = { locId: loc.id, conv: null, convAt: 0, done: {}, used: {} }; s.pos = loc.id;
+    s.visit = { locId: loc.id, conv: null, convAt: 0, done: {}, used: {}, snoopCount: 0 }; s.pos = loc.id;
     s.play.visits = (s.play.visits || 0) + 1;
     if (!s.play.visited[loc.id]) { s.play.visited[loc.id] = true; if (s.player && s.player.archive) delete s.player.archive['l:' + loc.id]; Log.narr(s, loc.name + '. ' + loc.description); }
     else Log.narr(s, 'Je bent terug in ' + loc.name + ', om ' + U.hm(Clock.norm(s)) + '.');
+    // v0.19.0: if someone under pressure just slipped away from here, a bystander mentions it on arrival
+    const dvMap = s.play.divert || {}, now = Clock.norm(s);
+    const fled = Object.keys(dvMap).find((id) => {
+      const d = dvMap[id];
+      return d && !d.rumored && d.day === s.clock.day && d.fromLocId === loc.id && now >= d.from && now < d.until && s.play.met && s.play.met[id];
+    });
+    if (fled) {
+      const npc = World.npc(s, fled), dest = World.loc(s, dvMap[fled].locId);
+      if (npc && dest) {
+        dvMap[fled].rumored = true;
+        Log.narr(s, Text.say(s, 'pressure.rumor', Text.npcVars(s, npc, { place: dest.name }), 'prum|' + fled + '|' + s.clock.day));
+      }
+    }
     this._done(s);
   },
-  // v0.12.0: walking costs minutes from where you are; you arrive in the part of the day the clock has reached by then
+  // v0.12.0 / v0.19.0: walking costs minutes from where you are; arrival checked against real opening hours
   visit(s, locId) {
     if (s.play.ended || s.visit) return false;
     Clock.norm(s); if (s.clock.part >= DAY.parts) return false;
     const T = Travel.check(s, locId), loc = T.loc; if (!loc) return false;
     if (T.late) { Log.sys(s, 'Je komt pas om ' + U.hm(T.at) + ' aan in ' + loc.name + '. Dat is te laat voor vandaag.'); return false; }
-    if (!T.open) { Log.sys(s, loc.name + ' is dicht in de ' + PARTS[T.part] + (T.part !== s.clock.part ? ', als je er om ' + U.hm(T.at) + ' aankomt' : '') + '. Open van ' + loc.open[0] + ' tot ' + loc.open[1] + ' uur.'); return false; }
+    if (!T.open) { Log.sys(s, loc.name + ' is dicht om ' + U.hm(T.at) + '. Open van ' + String(loc.open[0]).padStart(2, '0') + ':00 tot ' + String(Math.min(24, loc.open[1])).padStart(2, '0') + ':00.'); return false; }
     if (T.walk) { Log.narr(s, 'Je loopt naar ' + loc.name + '. Dat kost ' + T.walk + ' minuten.'); Clock.spend(s, T.walk); }
     this._open(s, loc); return true;
   },
@@ -1378,7 +1567,6 @@ const Act = {
     const A = s.player.archive = s.player.archive || {}; if (on) A[id] = true; else delete A[id]; return true;
   },
   // v0.11.0 / v0.14.0: a thread between any two board cards with optional meaning (verband / bevestigd / vermoeden).
-  // Calling without kind toggles (backward compatible). Calling with a different kind updates its meaning; same kind removes it.
   thread(s, a, b, kind) {
     if (!a || !b || a === b || !Pins.ok(s, a) || !Pins.ok(s, b)) return false;
     const T = s.player.threads = Pins.threads(s).slice(), k = Pins.key(a, b), i = T.findIndex((t) => Pins.key(t[0], t[1]) === k);
@@ -1424,8 +1612,16 @@ const Act = {
     s.player.seenJournal = Pins.journalCounts(s);
     return true;
   },
-  wait(s) {
+  // v0.19.0: wait(s, mins) advances smoothly by `mins` minutes (e.g. 60 min from UI); without `mins` advances to next part (compat/tests)
+  wait(s, mins) {
     if (s.play.ended || s.visit) return false; Clock.norm(s); if (s.clock.part >= DAY.parts) return false;
+    if (typeof mins === 'number' && mins > 0) {
+      const step = Math.min(mins, Clock.left(s));
+      if (step <= 0) return false;
+      Clock.spend(s, step);
+      Log.narr(s, 'Je laat ' + step + ' minuten voorbijgaan. Het is nu ' + U.hm(Clock.norm(s)) + ' in ' + s.world.city.name + '.');
+      this._done(s); return true;
+    }
     const part = s.clock.part;
     Log.narr(s, Text.say(s, 'day.wait', { part: PARTS[part], next: PARTS[part + 1], weather: Text.weather(s) }, 'wait'));
     Clock.nextPart(s); this._done(s); return true;
@@ -1452,17 +1648,29 @@ const Act = {
     if (spent) { Log.narr(s, Text.say(s, 'obj.done', { obj: obj.name }, 'done')); this._done(s); return; }   // nothing new: free
     if (!this._can(s, 'examine')) { this._done(s); return; }
     Log.narr(s, Text.say(s, 'obj.examine', { obj: obj.name }, 'examine'));
+    const owner = World.present(s, loc).filter((n) => n.locationId === loc.id && People.known(s, n.id)).sort(byNameE)[0] || null;
     if (ev && Evidence.reqMet(s, ev)) {
       delete s.play.early[obj.id];
       Log.narr(s, ev.text);
       Evidence.give(s, ev, 'object');
+      if (owner) Living.addPressure(s, owner.id, 8);
     } else if (ev) {
       Log.narr(s, Text.say(s, 'obj.tooEarly', {}, 'early'));
       if (Level.get(s).early) { s.play.early[obj.id] = true; Log.sys(s, 'Je markeert ' + obj.name + ' met een ? in je notities om hier later terug te keren.'); }
     } else {
       s.play.examined[obj.id] = true;
+      s.visit.snoopCount = (s.visit.snoopCount || 0) + 1;
       const y = World.yieldOf(s, loc, obj);
       Log.narr(s, y || Text.say(s, 'obj.nothing.' + loc.template, Text.vars(s), 'obj' + obj.id));
+      // v0.19.0 (Fase I): social deterrent against blindly clicking every object in someone's space
+      if (owner) {
+        Living.addPressure(s, owner.id, 6);
+        if (s.visit.snoopCount >= 2) {
+          Rels.apply(s, owner.id, { suspicion: 5, resentment: 2 });
+          Living.addPressure(s, owner.id, 10);
+          Log.narr(s, Text.say(s, 'obj.snoop', Text.npcVars(s, owner), 'snoop|' + owner.id + '|' + s.turn));
+        }
+      }
     }
     this._tick(s, 'examine'); this._done(s);
   },
@@ -1472,11 +1680,16 @@ const Act = {
     if (s.visit.conv === npcId) return true;
     this.talkEnd(s); if (!s.visit) return false;
     // speaking to a stranger costs the same as any greeting, so the price never tells core from crowd
-    const kind = People.known(s, npcId) ? 'talk' : 'greet';
+    const wasKnown = People.known(s, npcId);
+    const kind = wasKnown ? 'talk' : 'greet';
     if (!this._can(s, kind)) { this._done(s); return false; }
     s.visit.conv = npcId; s.visit.convAt = s.play.logN || 0;
     if (!s.play.met[npcId]) { s.play.met[npcId] = true; if (s.player && s.player.archive) delete s.player.archive['p:' + npcId]; Log.narr(s, npc.name + ', ' + npc.role + '. ' + Rnd.cap(npc.personality) + '; ' + npc.voice + '.'); }
     else Log.narr(s, 'Je zoekt ' + npc.name + ' op.');
+    // v0.19.0: a known person under elevated pressure opens visibly tense (100% leak-free, driven only by player heat)
+    if (wasKnown && Living.pressureLevel(s, npcId) !== 'calm') {
+      Log.npc(s, npc, Text.speak(s, npc, 'pressure.cue', Text.npcVars(s, npc)), Rels.toneOf(s, npcId));
+    }
     this._tick(s, kind); s.turn++; return true;
   },
   // ends the current conversation; that person is done for this visit. A place that closed meanwhile shows you out.
@@ -1493,6 +1706,7 @@ const Act = {
       }
     }
     s.visit.done[npcId] = true; s.visit.conv = null;
+    if (Living.pressure(s, npcId) >= 45) Living.maybeDivert(s, npcId);
     if (s.visit.closing) Clock.shut(s);
   },
   _use(s, npcId, key) { (s.visit.used[npcId] = s.visit.used[npcId] || []).push(key); },
@@ -1507,6 +1721,7 @@ const Act = {
     // v0.17.0: reconciliation topic calms cold/hostile relations without soft-locking a case
     if (topicId === 'verzoen') {
       Rels.apply(s, npcId, { resentment: -8, suspicion: -6, trust: 6, affection: 2 });
+      Living.addPressure(s, npcId, -10);
       const tone2 = Rels.toneOf(s, npcId), v2 = Text.npcVars(s, npc);
       Log.npc(s, npc, Text.speak(s, npc, 'rel.reconcile', v2), tone2);
       Log.sys(s, 'De lucht met ' + U.first(npc) + ' klaart merkbaar op.');
@@ -1514,6 +1729,7 @@ const Act = {
     }
     const fit = Dialogue.fit(npc, approach);
     Rels.apply(s, npcId, fit[1]);
+    if (approach === 'sharp') Living.addPressure(s, npcId, 8);
     if (fit[0] === 'good') s.play.warmTalks[npcId] = (s.play.warmTalks[npcId] || 0) + 1;   // v0.9.0: counts talks in the right tone
     const cueKey = 'cue|' + npcId + '|' + approach;
     if (fit[0] !== 'ok' && s.visit && !(s.visit.used[npcId] || []).some((k) => k === cueKey)) { this._use(s, npcId, cueKey); Log.narr(s, Text.say(s, fit[0] === 'good' ? 'tone.good' : 'tone.bad', Text.npcVars(s, npc), 'cue|' + npcId)); }
@@ -1526,6 +1742,7 @@ const Act = {
       else { const l = Dialogue.crimeLine(s, npc, approach); Log.npc(s, npc, l.text, tone); if (l.hint && Level.get(s).hint) Log.sys(s, 'Iets in die reactie klopt niet. Je onthoudt het.'); Dialogue.giveWarmTip(s, npc); }
     } else if (topicId === 'alibi') {
       s.play.asked[npcId + ':alibi'] = true;
+      Living.addPressure(s, npcId, 15);
       if (tone === 'hostile') Log.npc(s, npc, Text.say(s, 'alibi.hostileLead', v, 'lead|' + npc.id) + ' ' + Dialogue.alibiLine(s, npc), tone);
       else Log.npc(s, npc, Dialogue.alibiLine(s, npc), tone);
     } else if (topicId === 'xt') {
@@ -1534,6 +1751,7 @@ const Act = {
       Log.npc(s, npc, Text.speak(s, npc, 'xt.answer', v), Rels.toneOf(s, npcId));
     } else if (topicId.indexOf('chk:') === 0) {
       const x = World.npc(s, topicId.slice(4)), a = s.alibis[x.id], L = Level.get(s);
+      Living.addPressure(s, x.id, 25);
       if (tone !== 'warm' && tone !== 'neutral') { Log.npc(s, npc, evade(tone), tone); Log.sys(s, U.first(npc) + ' wil daar nu niets over zeggen. Met een andere toon lukt het misschien bij een volgend bezoek.'); }
       else {
         s.play.alibiCheck = s.play.alibiCheck || {};
@@ -1563,6 +1781,7 @@ const Act = {
     const npc = World.npc(s, c.npcId);
     if (!Dialogue.confronts(s, npc).some((x) => x.id === conId)) return;
     this._use(s, npc.id, 'con:' + conId);
+    Living.addPressure(s, npc.id, 22);
     const counter = Evidence.get(s, c.counterEvidence);
     s.play.resolved[conId] = true;
     const v = Text.npcVars(s, npc, { title: counter.title, loc: World.loc(s, s.truth.otherLocationId).name });
@@ -1593,6 +1812,7 @@ const Act = {
     if (Dialogue.used(s, npc.id).indexOf(key) < 0) {
       this._use(s, npc.id, key);
       Rels.apply(s, npc.id, { suspicion: 2, resentment: 1 });
+      Living.addPressure(s, npc.id, 10);
     }
     const tone = Rels.toneOf(s, npc.id);
     Log.npc(s, npc, Text.speak(s, npc, 'confront.wrong.' + tone, Text.npcVars(s, npc, { title: ev.title })), tone);
@@ -1622,12 +1842,91 @@ const Act = {
     const warm = Rels.toneOf(s, npcId) === 'warm';
     s.player.money -= Dialogue.treatCost(s, npc);
     Rels.apply(s, npcId, warm ? { affection: 6, trust: 4, resentment: -4 } : { affection: 4, trust: 2, resentment: -2 });
+    Living.addPressure(s, npcId, -8);
     const drink = Text.say(s, 'drink', {}, 'drink', { limit: 99 }), v = Text.npcVars(s, npc, { drink: drink });
     Log.narr(s, Text.say(s, 'treat.narr', v, 'treat'));
     Log.npc(s, npc, Rels.toneOf(s, npcId) === 'hostile' ? Text.say(s, 'treat.hostile', v, 'treath') : Text.speak(s, npc, 'treat.ok', v), Rels.toneOf(s, npcId));
     this._done(s);
   },
   setDossier(s, field, id) { if (['suspectId', 'motiveEvidenceId', 'methodEvidenceId'].indexOf(field) >= 0) s.player.dossier[field] = id || null; },
+  // v0.19.0 (Fase I): live 3-beat Final Confrontation ("De Ontmaskering") holding the signed Zaakverslag
+  startFinalConfront(s) {
+    if (s.play.ended) return null;
+    const d = s.player.dossier;
+    if (!d.suspectId || !d.motiveEvidenceId || !d.methodEvidenceId) return null;
+    const sus = World.npc(s, d.suspectId), mot = Evidence.get(s, d.motiveEvidenceId), met = Evidence.get(s, d.methodEvidenceId);
+    if (!sus || !mot || !met) return null;
+    if (s.visit) { this.talkEnd(s); s.visit = null; }
+    const now = Clock.norm(s);
+    const locId = Schedule.atMin(s, sus.id, s.clock.day, Math.min(now, NIGHT - 15)) || sus.locationId;
+    const loc = World.loc(s, locId);
+    const v = Text.npcVars(s, sus);
+    const fc = {
+      suspectId: sus.id,
+      motiveEvidenceId: mot.id,
+      methodEvidenceId: met.id,
+      locId: locId,
+      step: 0,
+      outcome: null,
+      failKind: null,
+      log: [
+        { who: 'narr', text: 'Je stapt met je zaakverslag op ' + sus.name + ' af bij ' + (loc ? loc.name : s.world.city.name) + '. Omstanders vallen stil.' },
+        { who: 'you', text: '"' + sus.name + ', mijn onderzoek is rond. U zit achter het voorval rond ' + s.crime.victim.name + '."' },
+        { who: 'npc', text: Text.say(s, 'final.deny', v, 'fdeny|' + s.turn) }
+      ]
+    };
+    s.play.finalConfront = fc;
+    Living.addPressure(s, sus.id, 25);
+    this._done(s);
+    return fc;
+  },
+  stepFinalConfront(s) {
+    const fc = s.play.finalConfront;
+    if (!fc || fc.outcome) return fc;
+    const sus = World.npc(s, fc.suspectId), mot = Evidence.get(s, fc.motiveEvidenceId), met = Evidence.get(s, fc.methodEvidenceId);
+    if (!sus || !mot || !met) { s.play.finalConfront = null; return null; }
+    if (fc.step === 0) {
+      fc.step = 1;
+      fc.log.push({ who: 'you', text: 'Je legt het eerste bewijsstuk uit je verslag op tafel — het Waarom: "' + mot.title + '".' });
+      fc.log.push({ who: 'npc', text: Text.say(s, 'final.motive', Text.npcVars(s, sus, { title: mot.title }), 'fmot|' + s.turn) });
+      this._done(s);
+      return fc;
+    }
+    if (fc.step === 1) {
+      fc.step = 2;
+      fc.log.push({ who: 'you', text: 'Dan leg je het sluitstuk neer — het Hoe: "' + met.title + '". "Uw verhaal houdt geen stand meer."' });
+      const res = Accuse.evaluate(s);
+      if (res.correct) {
+        fc.outcome = 'surrender';
+        fc.log.push({ who: 'npc', text: Text.say(s, 'final.surrender', Text.npcVars(s, sus, { title: met.title }), 'fsur|' + s.turn) });
+        fc.log.push({ who: 'hero', text: Text.say(s, 'final.hero', Text.npcVars(s, sus), 'fhero|' + s.turn) });
+        this.accuse(s);
+        // Let the player savor the surrender & hero beat before opening the full ending modal
+        s.play.endingShown = true;
+      } else {
+        fc.outcome = 'refuted';
+        fc.failKind = res.failKind || 'evidence';
+        const refKey = 'final.refute.' + (['person', 'motive', 'method', 'mismatch'].indexOf(fc.failKind) >= 0 ? fc.failKind : 'method');
+        const refTitle = fc.failKind === 'motive' ? mot.title : met.title;
+        fc.log.push({ who: 'npc', text: Text.say(s, refKey, Text.npcVars(s, sus, { title: refTitle }), 'fref|' + s.turn) });
+        // Apply accusation penalty directly (keeps fluent clock: +60 min instead of jumping whole part)
+        s.play.wrongAccusations++;
+        s.cast.forEach((n) => Rels.apply(s, n.id, { trust: -5 }));
+        Rels.apply(s, sus.id, { resentment: 25, trust: -15 });
+        Log.narr(s, res.reason);
+        Log.sys(s, 'De confrontatie houdt geen stand. Het kost je vertrouwen in de stad en een uur kostbare tijd.');
+        Clock.spend(s, 60);
+        this._done(s);
+      }
+      return fc;
+    }
+    return fc;
+  },
+  finishFinalConfront(s) {
+    if (!s || !s.play) return false;
+    s.play.finalConfront = null;
+    return true;
+  },
   accuse(s) {
     if (s.play.ended) return null;
     const res = Accuse.evaluate(s);
@@ -1681,17 +1980,25 @@ const Rules = {
   }
 };
 
-/* ---------------- Accusation (v0.6.3: style-aware Zaakverslag ending) ---------------- */
+/* ---------------- Accusation (v0.6.3 / v0.19.0: style-aware Zaakverslag & targeted refutation) ---------------- */
 const Accuse = {
   evaluate(s) {
     const d = s.player.dossier, T = s.truth;
     if (!d.suspectId || !d.motiveEvidenceId || !d.methodEvidenceId) return { complete: false };
     const m = Evidence.get(s, d.motiveEvidenceId), me = Evidence.get(s, d.methodEvidenceId), sus = World.npc(s, d.suspectId);
-    if (!m || !me || !s.play.found[m.id] || !s.play.found[me.id] || m.slot !== 'motive' || me.slot !== 'method') return { complete: true, correct: false, reason: Text.say(s, 'accuse.mismatch', {}, 'acc') };
-    if (d.suspectId !== T.culpritId) return { complete: true, correct: false, reason: Text.say(s, 'accuse.person', Text.npcVars(s, sus), 'acc') };
-    if (m.pointsTo !== T.culpritId || me.pointsTo !== T.culpritId || s.play.debunked[m.id] || s.play.debunked[me.id])
-      return { complete: true, correct: false, reason: Text.say(s, 'accuse.evidence', Text.npcVars(s, sus), 'acc') };
-    return { complete: true, correct: true };
+    if (!m || !me || !s.play.found[m.id] || !s.play.found[me.id] || m.slot !== 'motive' || me.slot !== 'method') {
+      return { complete: true, correct: false, failKind: 'mismatch', reason: Text.say(s, 'accuse.mismatch', {}, 'acc') };
+    }
+    if (d.suspectId !== T.culpritId) {
+      return { complete: true, correct: false, failKind: 'person', reason: Text.say(s, 'accuse.person', Text.npcVars(s, sus), 'acc') };
+    }
+    if (m.pointsTo !== T.culpritId || s.play.debunked[m.id]) {
+      return { complete: true, correct: false, failKind: 'motive', reason: Text.say(s, 'accuse.evidence', Text.npcVars(s, sus), 'acc') };
+    }
+    if (me.pointsTo !== T.culpritId || s.play.debunked[me.id]) {
+      return { complete: true, correct: false, failKind: 'method', reason: Text.say(s, 'accuse.evidence', Text.npcVars(s, sus), 'acc') };
+    }
+    return { complete: true, correct: true, failKind: null };
   },
   ending(s, res) {
     const T = s.truth, c = World.npc(s, T.culpritId), found = Evidence.found(s).length, total = s.evidence.length;
@@ -1953,11 +2260,11 @@ const SimPlayer = {
     const scoreLoc = (l, part, chkSet) => {
       const T = Travel.check(s, l.id);
       if (!T.open || T.late) return -1;
-      const timeLeft = Clock.partEnd(T.part) - T.at;
+      const timeLeft = World.closeMin(l) - T.at;
       if (timeLeft < Level.cost(s, 'examine')) return -1;
-      const hereAll = s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, s.clock.day, T.part) === l.id);
+      const hereAll = s.cast.concat(s.crowd).filter((x) => Schedule.atMin(s, x.id, s.clock.day, T.at) === l.id);
       const unmetN = hereAll.filter((x) => !People.known(s, x.id)).length;
-      const metCore = s.cast.filter((x) => p.met[x.id] && Schedule.at(s, x.id, s.clock.day, T.part) === l.id);
+      const metCore = s.cast.filter((x) => p.met[x.id] && Schedule.atMin(s, x.id, s.clock.day, T.at) === l.id);
       let sc = 0;
       const objs = locObjCount(l);
       if (objs > 0) sc += 12 + Math.min(objs, 4) * 2 + (l.id === s.crime.crimeLocationId || l.id === s.crime.victimLocationId ? 5 : 0);
@@ -1987,9 +2294,9 @@ const SimPlayer = {
       if (s.clock.part >= DAY.parts) { Act.endDay(s); continue; }
       const chkSet = pendingCheckTargets();
       const ranked = s.world.locations.map((l) => ({ l: l, sc: scoreLoc(l, s.clock.part, chkSet) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc || (a.l.id < b.l.id ? -1 : 1));
-      if (!ranked.length) { Act.wait(s); continue; }
+      if (!ranked.length) { Act.wait(s, 60); continue; }
       const targetLoc = ranked[0].l;
-      if (!Act.visit(s, targetLoc.id)) { Act.wait(s); continue; }
+      if (!Act.visit(s, targetLoc.id)) { Act.wait(s, 60); continue; }
 
       let vGuard = 0;
       while (s.visit && !p.ended && vGuard++ < 30) {
@@ -2008,7 +2315,7 @@ const SimPlayer = {
           }
           continue;
         }
-        const allHere = s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, s.clock.day, s.clock.part) === loc.id && !People.known(s, x.id) && !s.visit.done[x.id]).sort((a, b) => (a.age - b.age) || (a.height - b.height) || (a.id < b.id ? -1 : 1));
+        const allHere = s.cast.concat(s.crowd).filter((x) => Schedule.atMin(s, x.id, s.clock.day, Clock.norm(s)) === loc.id && !People.known(s, x.id) && !s.visit.done[x.id]).sort((a, b) => (a.age - b.age) || (a.height - b.height) || (a.id < b.id ? -1 : 1));
         if (allHere.length && rest >= Level.cost(s, 'greet')) {
           const who = allHere[0];
           if (Act.greet(s, who.id)) {
@@ -2063,10 +2370,10 @@ const Hints = {
       method: found.some((e) => e.slot === 'method')
     };
   },
-  slotLabel: (slot) => slot === 'motive' ? 'het motief' : slot === 'method' ? 'de werkwijze of het alibi' : 'een nieuw aanknopingspunt',
+  slotLabel: (slot) => slot === 'motive' ? 'het motief (Waarom)' : slot === 'method' ? 'de werkwijze of het alibi (Hoe)' : 'een nieuw aanknopingspunt',
   get(s, tier) {
     if (!s || s.play.ended) return null;
-    const t = Math.max(1, Math.min(3, +tier || 1)), p = s.play, need = this.slotNeed(s);
+    const t = Math.max(1, Math.min(3, +tier || 1)), p = s.play, need = this.slotNeed(s), nowMin = Clock.norm(s);
     const wrap = (kind, title, texts) => ({
       tier: t, kind: kind, title: title, text: texts[t - 1], hasNext: t < 3
     });
@@ -2076,7 +2383,7 @@ const Hints = {
       .find((c) => p.heard[c.id] && !p.resolved[c.id] && p.found[c.counterEvidence]);
     if (readyCon) {
       const npc = World.npc(s, readyCon.npcId), ev = Evidence.get(s, readyCon.counterEvidence), yEv = Evidence.get(s, readyCon.yields);
-      const locNow = s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, npc.id, s.clock.day, s.clock.part)) : null;
+      const locNow = nowMin < NIGHT ? World.loc(s, Schedule.atMin(s, npc.id, s.clock.day, nowMin)) : null;
       return wrap('confront', 'Tegenstrijdige verklaring', [
         'Een verklaring die je al hebt gehoord, botst met een van je gevonden bewijsstukken.',
         'Spreek ' + npc.name + ' opnieuw aan tijdens een bezoek en leg een bewijsstuk voor.',
@@ -2091,7 +2398,7 @@ const Hints = {
     });
     if (openAl) {
       const comp = World.npc(s, s.alibis[openAl.id].withId);
-      const locNow = p.met[comp.id] && s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, comp.id, s.clock.day, s.clock.part)) : null;
+      const locNow = p.met[comp.id] && nowMin < NIGHT ? World.loc(s, Schedule.atMin(s, comp.id, s.clock.day, nowMin)) : null;
       return wrap('alibi', 'Ongecontroleerd alibi', [
         'Je hebt een alibi gehoord dat je nog kunt nagaan bij de persoon die erbij was.',
         'Spreek ' + comp.name + ' aan en vraag naar het alibi van ' + openAl.name + '.',
@@ -2109,7 +2416,7 @@ const Hints = {
       const e = readyEvs[0];
       if (e.source.type === 'object') {
         const loc = World.loc(s, e.source.locationId), obj = loc.objects.find((o) => o.id === e.source.objectId);
-        const openNow = World.openAt(loc, s.clock.part);
+        const openNow = World.openAtMin(loc, nowMin);
         return wrap('object', 'Spoor op een locatie', [
           'Er valt nog iets belangrijks te ontdekken bij ' + loc.name + '.',
           'Ga naar ' + loc.name + ' en bekijk ' + obj.name + ' van dichtbij.',
@@ -2117,7 +2424,7 @@ const Hints = {
         ]);
       }
       const npc = World.npc(s, e.source.npcId);
-      const locNow = p.met[npc.id] && s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, npc.id, s.clock.day, s.clock.part)) : null;
+      const locNow = p.met[npc.id] && nowMin < NIGHT ? World.loc(s, Schedule.atMin(s, npc.id, s.clock.day, nowMin)) : null;
       return wrap('talk', 'Gesprek met een betrokkene', [
         'Iemand in de stad weet meer over de zaak dan je tot nu toe hebt gevraagd.',
         'Spreek ' + npc.name + ' aan en stel de openstaande zaakvraag.',
@@ -2144,16 +2451,16 @@ const Hints = {
         return wrap('meet', 'Nog niet iedereen gesproken', [
           'Er zijn nog betrokkenen die je niet hebt gesproken. Kijk op de kaart bij plekken met een vraagteken.',
           'Zoek ' + unmet.name + ' op tijdens een bezoek en spreek diegene aan.',
-          'Je mist nog stevig bewijs voor ' + (!need.motive ? 'het motief' : 'de werkwijze') + '. Nieuwe gesprekken openen vaak een vervolgspoor.'
+          'Je mist nog stevig bewijs voor ' + (!need.motive ? 'het motief (Waarom)' : 'de werkwijze of het alibi (Hoe)') + '. Nieuwe gesprekken openen vaak een vervolgspoor.'
         ]);
       }
     }
 
     // 6. Ready to deduce and fill out the Zaakverslag
     return wrap('solve', 'Klaar om te vergelijken', [
-      'Je hebt sterke sporen voor zowel motief als werkwijze. Leg alle aanwijzingen rustig naast elkaar.',
+      'Je hebt sterke sporen voor zowel Waarom (motief) als Hoe (werkwijze/alibi). Leg alle aanwijzingen rustig naast elkaar.',
       'Open het Verdachtenoverzicht op het Zaakbord en vergelijk beginletter, kenmerk en alibi-status van elke betrokkene.',
-      'Slechts één persoon past op alle sporen tegelijk. Vul de drie velden in via Zaakverslag zodra je zeker bent.'
+      'Slechts één persoon past op alle sporen tegelijk. Stel je Zaakverslag op en confronteer de verdachte zodra je zeker bent.'
     ]);
   }
 };
@@ -2168,12 +2475,13 @@ const Game = {
       player: { money: 25, dossier: { suspectId: null, motiveEvidenceId: null, methodEvidenceId: null }, links: {}, threads: [], archive: {}, marks: {}, notes: {}, seen: { case: 'case' }, seenJournal: null },
       visit: null,
       meta: w.meta, protagonist: w.protagonist, world: w.world, crime: w.crime, truth: w.truth,
-      cast: w.cast, crowd: w.crowd, schedule: null, evidence: w.evidence, contradictions: w.contradictions, relations: w.relations, alibis: w.alibis,
-      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, knownSched: {}, warmTip: {}, hostileSpread: {}, wrongAccusations: 0, visits: 0, ended: null },
+      cast: w.cast, crowd: w.crowd, schedule: null, scheduleShift: null, evidence: w.evidence, contradictions: w.contradictions, relations: w.relations, alibis: w.alibis,
+      play: { found: {}, heard: {}, resolved: {}, cleared: {}, asked: {}, met: {}, metCrowd: {}, visited: {}, early: {}, examined: {}, xt: {}, xtDone: {}, warmTalks: {}, flipped: {}, debunked: {}, alibiCheck: {}, heardOf: {}, heardOfLoc: {}, knownSched: {}, warmTip: {}, hostileSpread: {}, pressure: {}, divert: {}, finalConfront: null, wrongAccusations: 0, visits: 0, ended: null },
       ui: {},
       log: []
     };
     s.schedule = Schedule.build(s);
+    s.scheduleShift = Schedule.buildShifts(s);
     const P = s.protagonist, start = World.loc(s, s.startLoc);
     Log.narr(s, s.meta.title + '. ' + s.meta.eraLabel + '.');
     // v0.11.1: first who you are, then the town by name, then the crime
@@ -2183,7 +2491,7 @@ const Game = {
     Log.narr(s, s.crime.summary + ' ' + s.crime.personalHook);
     Evidence.give(s, s.evidence[0], 'start');
     Log.narr(s, 'Je logeert in ' + start.name + '.');
-    Log.sys(s, 'Het is acht uur en je bent in ' + start.name + '. Lopen naar een andere plek kost 15 tot 45 minuten. Aanspreken en onderzoeken kost ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + '. Om twaalf en om vijf uur gaan de mensen naar hun volgende plek.');
+    Log.sys(s, 'Het is acht uur en je bent in ' + start.name + '. Lopen naar een andere plek kost 15 tot 45 minuten. Aanspreken en grondig onderzoeken kost ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + '. De stad beweegt door de dag heen: mensen komen en gaan volgens hun eigen ritme.');
     Act.see(s);
     Act.seeJournal(s);
     return s;
@@ -2244,14 +2552,11 @@ const Save = {
   MIN_SCHEMA: 8,
   REQUIRED: ['seed', 'clock', 'player', 'world', 'cast', 'crowd', 'schedule', 'evidence', 'contradictions', 'relations', 'alibis', 'settings', 'play', 'log'],
   lastMigration: null,
-  // v0.18.0 (Fase H): structured schema-evolution pipeline.
+  // v0.18.0 (Fase H) / v0.19.0 (Fase I): structured schema-evolution pipeline.
   // Each key `fromSchema` migrates a save object one step forward to `fromSchema + 1` and returns it.
   MIGRATIONS: {
     8(s) {
       // Schema 8 (v0.8.0-v0.17.0) -> Schema 9 (v0.18.0):
-      // Normalizes all incremental fields introduced across v0.11-v0.17 (free threads, archive,
-      // clock minutes, player position, mentions/ghost cards, marks/notes, seen badges, schedule tips,
-      // and relationship tracking) into an explicit canonical schema-9 save without false "Nieuw" badges.
       s.visit = s.visit || null;
       s.ui = s.ui || {};
       s.play.early = s.play.early || {};
@@ -2274,6 +2579,17 @@ const Save = {
       if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
       if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
       s.schema = 9;
+      s.version = 'v0.18.0';
+      return s;
+    },
+    9(s) {
+      // Schema 9 (v0.18.0) -> Schema 10 (v0.19.0):
+      // Adds staggered per-person daily routine shifts, living suspect pressure/diversions and final confrontation state.
+      if (!s.scheduleShift || typeof s.scheduleShift !== 'object') s.scheduleShift = Schedule.buildShifts(s);
+      s.play.pressure = s.play.pressure || {};
+      s.play.divert = s.play.divert || {};
+      if (!('finalConfront' in s.play)) s.play.finalConfront = null;
+      s.schema = 10;
       s.version = APP.version;
       return s;
     }
@@ -2344,14 +2660,16 @@ const Save = {
     s.player.notes = s.player.notes || {};
     Clock.norm(s);
     s.pos = s.pos || (s.visit ? s.visit.locId : s.startLoc);
+    if (!s.scheduleShift || typeof s.scheduleShift !== 'object') s.scheduleShift = Schedule.buildShifts(s);
     if (!s.play.heardOf || !s.play.heardOfLoc) {
       s.play.heardOf = s.play.heardOf || {};
       s.play.heardOfLoc = s.play.heardOfLoc || {};
       (s.log || []).forEach((e) => Mentions.scan(s, e));
     }
-    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread'].forEach((k) => {
+    ['metCrowd', 'examined', 'xt', 'xtDone', 'knownSched', 'warmTip', 'hostileSpread', 'pressure', 'divert'].forEach((k) => {
       s.play[k] = s.play[k] || {};
     });
+    if (!('finalConfront' in s.play)) s.play.finalConfront = null;
     if (!s.player.seen || typeof s.player.seen !== 'object') { s.player.seen = { case: 'case' }; Act.see(s); }
     if (!s.player.seenJournal || typeof s.player.seenJournal !== 'object') Act.seeJournal(s);
     return s;
@@ -2392,8 +2710,8 @@ const Save = {
 
 /* ---------------- Tests ---------------- */
 const Tests = {
-  // helper for tests: open a visit where a person is in the current part (debug route, costs no part)
-  meet(s, id) { const loc = Schedule.at(s, id, s.clock.day, s.clock.part); return !!loc && Act.force(s, loc); },
+  // helper for tests: open a visit where a person is at the current clock minute (debug route, costs no time)
+  meet(s, id) { const loc = Schedule.atMin(s, id, s.clock.day, Clock.norm(s)); return !!loc && Act.force(s, loc); },
   run(nSeeds) {
     nSeeds = nSeeds || 30; const out = [], t = (name, fn) => { try { const r = fn(); out.push({ name: name, ok: r === true || (r && r.ok), info: r && r.info ? r.info : '' }); } catch (e) { out.push({ name: name, ok: false, info: e.message }); } };
     t('Determinisme: zelfde seed geeft zelfde wereld en rooster', () => Save.pack(Game.create('det-1')) === Save.pack(Game.create('det-1')));
@@ -2474,8 +2792,13 @@ const Tests = {
     t('Dagdelen: een gesloten plek kun je niet bezoeken', () => {
       const bad = [];
       for (let i = 0; i < 10; i++) {
-        const s = Game.create('shut-' + i); s.clock.part = 2;
-        s.world.locations.forEach((l) => { const r = Act.visit(s, l.id); if (r !== World.openAt(l, 2)) bad.push('shut-' + i + ' ' + l.template); if (s.visit) s.visit = null; });
+        const s = Game.create('shut-' + i); s.clock.part = 2; s.clock.min = 1140;
+        s.world.locations.forEach((l) => {
+          const T = Travel.check(s, l.id), r = Act.visit(s, l.id);
+          if (r !== (T.open && !T.late)) bad.push('shut-' + i + ' ' + l.template);
+          if (s.visit) s.visit = null;
+          s.clock.part = 2; s.clock.min = 1140; s.pos = s.startLoc;
+        });
       }
       return { ok: !bad.length, info: bad.slice(0, 3).join(' | ') };
     });
@@ -2690,9 +3013,12 @@ const Tests = {
     t('Tableau: hotspots volgen het rooster, compleet en uniek (' + nSeeds + ' seeds, 3 dagdelen)', () => {
       const b2 = [];
       for (let i = 0; i < nSeeds; i++) {
-        const s = Game.create('tab-' + i), fam = famOf(s);
+        const s = Game.create('tab-' + i), fam = famOf(s), nowMin = Clock.norm(s);
         s.world.locations.forEach((l) => [0, 1, 2].forEach((p) => {
-          const M = Tableau.model(s, l.id, p), ids = M.hs.map((h) => h.id), open = World.openAt(l, p), at = (x) => Schedule.at(s, x.id, s.clock.day, p) === l.id;
+          const useNow = p === s.clock.part;
+          const M = Tableau.model(s, l.id, p), ids = M.hs.map((h) => h.id);
+          const open = useNow ? World.openAtMin(l, nowMin) : World.openAt(l, p);
+          const at = (x) => (useNow ? Schedule.atMin(s, x.id, s.clock.day, nowMin) : Schedule.at(s, x.id, s.clock.day, p)) === l.id;
           const want = l.objects.map((o) => 'obj:' + o.id).concat(open ? s.cast.filter(at).map((n) => 'npc:' + n.id).concat(s.crowd.filter(at).map((c) => 'crowd:' + c.id)) : []);
           const n = (Tableau.svg(s, l.id, p, fam).match(/ data-hs="/g) || []).length;
           if (new Set(ids).size !== ids.length || ids.length !== want.length || want.some((x) => ids.indexOf(x) < 0) || n !== ids.length) b2.push('tab-' + i + ' ' + l.id + ' ' + PARTS[p]);
@@ -2728,10 +3054,10 @@ const Tests = {
       const b2 = [], u = (n) => MapGen.unknownBadges(n).join('|');
       if (u(0) !== '' || u(1) !== '?' || u(2) !== '2 ?' || u(3) !== '3 ?' || u(4) !== '3+ ?' || u(16) !== '3+ ?') b2.push('reeks ' + u(4));
       for (let i = 0; i < nSeeds; i++) {
-        const s = Game.create('unk-' + i), M = MapGen.build(s), svg = MapGen.svg(s, M, 0);
+        const s = Game.create('unk-' + i), M = MapGen.build(s), svg = MapGen.svg(s, M, 0), nowMin = Clock.norm(s);
         if (/>\?\d/.test(svg)) b2.push('unk-' + i + ' ?getal');
         s.world.locations.forEach((l) => { const g = svg.split('data-stn="' + l.id + '"')[1].split('</g><g class="stn')[0], q = (g.match(/<g class="unk">/g) || []).length, more = (g.match(/<g class="unk-more">/g) || []).length;
-          const n = World.openAt(l, 0) ? s.cast.concat(s.crowd).filter((x) => Schedule.at(s, x.id, 1, 0) === l.id).length : 0;
+          const n = World.openAtMin(l, nowMin) ? s.cast.concat(s.crowd).filter((x) => Schedule.atMin(s, x.id, 1, nowMin) === l.id).length : 0;
           if (q !== (n === 1 ? 1 : 0) || more !== (n >= 2 ? 1 : 0)) b2.push('unk-' + i + ' ' + l.template + ' ' + q + '+' + more + '/' + n); });
       }
       return { ok: !b2.length, info: b2.slice(0, 3).join(' | ') };
@@ -2857,8 +3183,8 @@ const Tests = {
     t('Start: om 08:00 in de logies, rondkijken zonder reistijd; elders heen kost lopen; slapen brengt je terug (' + nSeeds + ' seeds)', () => {
       const b2 = [];
       for (let i = 0; i < nSeeds; i++) {
-        const s = Game.create('start-' + i), home = World.loc(s, s.startLoc), other = s.world.locations.find((l) => l.id !== s.startLoc && World.openAt(l, 0)), id = 'start-' + i;
-        if (!World.openAt(home, 0) || s.clock.min !== 480 || s.pos !== home.id) { b2.push(id + ' start'); continue; }
+        const s = Game.create('start-' + i), home = World.loc(s, s.startLoc), other = s.world.locations.find((l) => l.id !== s.startLoc && Travel.check(s, l.id).open), id = 'start-' + i;
+        if (!World.openAtMin(home, 480) || s.clock.min !== 480 || s.pos !== home.id) { b2.push(id + ' start'); continue; }
         Act.visit(s, home.id); if (!s.visit || s.clock.min !== 480) b2.push(id + ' logies kost tijd'); Act.leave(s);
         if (other) { const w = Travel.min(s, home.id, other.id); Act.visit(s, other.id); if (s.clock.min !== 480 + w || !w) b2.push(id + ' lopen ' + w); Act.leave(s); }
         Act.wait(s); Act.wait(s); Act.wait(s); Act.endDay(s); if (s.pos !== home.id || s.clock.day !== 2) b2.push(id + ' nacht');
@@ -3318,6 +3644,130 @@ const Tests = {
       const sameMx = Board.matrix(mig, fam, null) === Board.matrix(w, fam, null);
       const sameSb = Spoorboek.html(mig, M, []) === Spoorboek.html(w, M, []);
       return { ok: chk.length === 0 && sameMx && sameSb, info: 'checks=' + chk.length + ', matrix=' + sameMx + ', spoorboek=' + sameSb };
+    });
+    // ----- v0.19.0 (fase I): fluid clock & living city, 2-step glance & snoop deterrent, pressure cues, live 3-beat Final Confrontation, schema 10 -----
+    t('Vloeiende klok & individuele roosters (v0.19.0): gespreide wisseltijden, nooit op een gesloten plek en vloeiend 1 uur wachten (' + nSeeds + ' seeds)', () => {
+      const bad = [];
+      for (let i = 0; i < nSeeds; i++) {
+        const s = Game.create('flu-' + i, 'normaal');
+        const t1s = new Set(s.cast.map((n) => Schedule.shiftsOf(s, n.id)[0]));
+        const t2s = new Set(s.cast.map((n) => Schedule.shiftsOf(s, n.id)[1]));
+        if (t1s.size < 3 || t2s.size < 3) bad.push('flu-' + i + ' niet gespreid');
+        [540, 660, 720, 810, 990, 1080, 1170].forEach((m) => {
+          s.cast.forEach((n) => {
+            const loc = World.loc(s, Schedule.atMin(s, n.id, 1, m));
+            if (!loc || !World.openAtMin(loc, m)) bad.push('flu-' + i + ' ' + n.id + ' dicht om ' + U.hm(m));
+          });
+        });
+      }
+      const s0 = Game.create('flu-wait', 'normaal'), m0 = Clock.norm(s0);
+      Act.wait(s0, 60);
+      const m1 = Clock.norm(s0);
+      Act.wait(s0, 60);
+      const m2 = Clock.norm(s0);
+      return { ok: !bad.length && m1 === m0 + 60 && m2 === m0 + 120, info: bad.length ? bad.slice(0, 3).join(' | ') : U.hm(m0) + ' -> ' + U.hm(m1) + ' -> ' + U.hm(m2) };
+    });
+    t('2-staps voorwerpen & snuffel-rem (v0.19.0): gratis eerste indruk is puur & lekvrij; herhaald leeg snuffelen bij bewoner wekt argwaan', () => {
+      let tested = false, snoopWorked = false, glancePure = true, glanceLeakFree = true;
+      for (let i = 0; i < 30 && !tested; i++) {
+        const s = Game.create('snp-' + i, 'normaal');
+        const owner = s.cast.find((n) => {
+          const l = World.loc(s, n.locationId);
+          if (!l || !World.openAtMin(l, 540)) return false;
+          const emptyObjs = l.objects.filter((o) => !s.evidence.some((e) => e.source.objectId === o.id));
+          return emptyObjs.length >= 2 && Schedule.atMin(s, n.id, 1, 540) === l.id;
+        });
+        if (!owner) continue;
+        tested = true;
+        s.play.met[owner.id] = true;
+        const loc = World.loc(s, owner.locationId);
+        const empties = loc.objects.filter((o) => !s.evidence.some((e) => e.source.objectId === o.id));
+        s.clock.min = 540; s.clock.part = 0;
+        const snap = Save.pack(s);
+        const g1 = World.glanceOf(s, loc, empties[0]);
+        if (Save.pack(s) !== snap || !g1 || !g1.text || !g1.watcher || g1.watcher.id !== owner.id) glancePure = false;
+        const w = U.clone(s); w.truth.culpritId = w.cast.find((x) => x.id !== w.truth.culpritId).id; w.cast.reverse();
+        const g2 = World.glanceOf(w, World.loc(w, loc.id), World.loc(w, loc.id).objects.find((x) => x.id === empties[0].id));
+        if (g1.text !== g2.text || (g1.watcher && g1.watcher.id) !== (g2.watcher && g2.watcher.id)) glanceLeakFree = false;
+        Act.force(s, loc.id);
+        const sus0 = s.relations[owner.id].suspicion, pr0 = Living.pressure(s, owner.id);
+        Act.examine(s, empties[0].id);
+        Act.examine(s, empties[1].id);
+        snoopWorked = s.relations[owner.id].suspicion > sus0 && Living.pressure(s, owner.id) > pr0 && s.visit.snoopCount >= 2;
+      }
+      return { ok: tested && glancePure && glanceLeakFree && snoopWorked, info: [tested, glancePure, glanceLeakFree, snoopWorked].join(', ') };
+    });
+    t('Verdachtendruk "In het vizier" (v0.19.0): spanning, gespannen gespreksopening, eenmalige uitwijk-routine en gerucht zijn 100% lekvrij', () => {
+      const runCase = (swap) => {
+        const s = Game.create('prs-1', 'normaal');
+        if (swap) { s.truth.culpritId = s.cast.find((x) => x.id !== s.truth.culpritId).id; s.cast.reverse(); }
+        const n = World.npc(s, 'npc_1');
+        s.play.met[n.id] = true;
+        const homeLoc = Schedule.atMin(s, n.id, 1, 540);
+        s.clock.min = 540; s.clock.part = 0;
+        Act.force(s, homeLoc);
+        Living.addPressure(s, n.id, 36);
+        const lvl = Living.pressureLevel(s, n.id), lbl = Living.pressureLabel(s, n.id);
+        const logBeforeTalk = s.log.length;
+        Act.talkStart(s, n.id);
+        const cueLine = s.log.slice(logBeforeTalk).find((e) => e.k === 'p' && e.npc === n.id);
+        Living.addPressure(s, n.id, 15);
+        Act.talkEnd(s);
+        const div = s.play.divert && s.play.divert[n.id];
+        Act.leave(s);
+        const newLoc = Schedule.atMin(s, n.id, 1, Clock.norm(s));
+        const logBeforeRevisit = s.log.length;
+        Act.force(s, homeLoc);
+        const rumorLine = s.log.slice(logBeforeRevisit).find((e) => e.k === 'n' && e.text.indexOf(U.first(n)) >= 0);
+        return { lvl: lvl, lbl: lbl, cue: cueLine ? cueLine.text : '', diverted: !!(div && newLoc === div.locId && div.locId !== homeLoc), rumor: rumorLine ? rumorLine.text : '' };
+      };
+      const a = runCase(false), b = runCase(true);
+      const ok = (a.lvl === 'tense' || a.lvl === 'high') && !!a.lbl && a.cue.length > 10 && a.diverted && a.rumor.length > 10 && JSON.stringify(a) === JSON.stringify(b);
+      return { ok: ok, info: 'lvl=' + a.lvl + ', divert=' + a.diverted + ', lekvrij=' + (JSON.stringify(a) === JSON.stringify(b)) };
+    });
+    t('Eindconfrontatie "De Ontmaskering" (v0.19.0): 3 slagen met gerichte weerlegging (person/motive/method/mismatch) en overgave + heldenmoment', () => {
+      const s0 = Solver.run(Game.create('fc-1', 'normaal')).state, cul = s0.truth.culpritId;
+      const goodMot = s0.evidence.find((e) => e.slot === 'motive' && e.pointsTo === cul);
+      const goodMet = s0.evidence.find((e) => e.slot === 'method' && e.pointsTo === cul);
+      const wrongMot = s0.evidence.find((e) => e.slot === 'motive' && e.pointsTo !== cul) || goodMot;
+      const wrongMet = s0.evidence.find((e) => e.slot === 'method' && e.pointsTo !== cul) || goodMet;
+      const otherSus = s0.cast.find((n) => n.id !== cul).id;
+      const testRefute = (dos, expected) => {
+        const st = U.clone(s0);
+        st.player.dossier = dos;
+        const fc0 = Act.startFinalConfront(st), st0 = fc0 && fc0.step;
+        const fc1 = Act.stepFinalConfront(st), st1 = fc1 && fc1.step;
+        const fc2 = Act.stepFinalConfront(st);
+        return !!(fc0 && st0 === 0 && st1 === 1 && fc2.outcome === 'refuted' && fc2.failKind === expected && !st.play.ended && st.play.wrongAccusations === 1);
+      };
+      const rPerson = testRefute({ suspectId: otherSus, motiveEvidenceId: goodMot.id, methodEvidenceId: goodMet.id }, 'person');
+      const rMismatch = testRefute({ suspectId: cul, motiveEvidenceId: goodMet.id, methodEvidenceId: goodMot.id }, 'mismatch');
+      const rMotive = wrongMot.id !== goodMot.id ? testRefute({ suspectId: cul, motiveEvidenceId: wrongMot.id, methodEvidenceId: goodMet.id }, 'motive') : true;
+      const rMethod = wrongMet.id !== goodMet.id ? testRefute({ suspectId: cul, motiveEvidenceId: goodMot.id, methodEvidenceId: wrongMet.id }, 'method') : true;
+      // Winning confrontation
+      const sw = U.clone(s0);
+      sw.player.dossier = { suspectId: cul, motiveEvidenceId: goodMot.id, methodEvidenceId: goodMet.id };
+      const w0 = Act.startFinalConfront(sw), ws0 = w0 && w0.step;
+      const w1 = Act.stepFinalConfront(sw), ws1 = w1 && w1.step;
+      const w2 = Act.stepFinalConfront(sw);
+      const hasHero = w2 && w2.log.some((e) => e.who === 'hero' && e.text.length > 20);
+      const viewHtml = typeof FinalConfrontView !== 'undefined' ? FinalConfrontView.html(sw, famOf(sw)) : '';
+      const winOk = !!(w0 && ws0 === 0 && ws1 === 1 && w2.outcome === 'surrender' && hasHero && sw.play.ended && sw.play.ended.correct && viewHtml.indexOf('fc-surrender') >= 0);
+      return { ok: rPerson && rMismatch && rMotive && rMethod && winOk, info: [rPerson, rMismatch, rMotive, rMethod, winOk].join(', ') };
+    });
+    t('Save.MIGRATIONS (v0.19.0): schema-9 save migreert schoon naar schema 10 (scheduleShift, pressure, divert) en doorstaat Game.check', () => {
+      const s = SpikeData.make('mig9-i1', 'midden');
+      const raw9 = JSON.parse(Save.pack(s));
+      raw9.schema = 9; raw9.version = 'v0.18.0';
+      delete raw9.scheduleShift; delete raw9.play.pressure; delete raw9.play.divert; delete raw9.play.finalConfront;
+      const json9 = JSON.stringify(raw9);
+      const info = Save.inspect(json9);
+      const mig = Save.unpack(json9), lm = Save.lastMigration;
+      const chk = Game.check(mig);
+      const ok = info.ok && info.migratable && info.schema === 9 && info.label.indexOf('9 → 10') >= 0 &&
+        mig.schema === 10 && lm && lm.from === 9 && lm.to === 10 && lm.steps.join(',') === '9->10' &&
+        !!mig.scheduleShift && !!mig.play.pressure && !!mig.play.divert && chk.length === 0;
+      return { ok: ok, info: (lm ? lm.steps.join(',') : 'geen') + ', checks=' + chk.length };
     });
     return out;
   }

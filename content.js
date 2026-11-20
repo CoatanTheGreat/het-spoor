@@ -1349,6 +1349,60 @@ const DEFAULT_CONTENT = {
    "{first} wisselt een korte, veelzeggende blik met {other}. De onrust slaat over.",
    "Na de botsing met {first} merk je dat ook {other} iets voorzichtiger is geworden."
   ],
+  "obj.snoop": [
+   "{first} werpt je een scherpe blik toe. \"Zoekt u iets bepaalds tussen mijn spullen?\"",
+   "\"Zou u niet zomaar alles overhoop willen halen?\" zegt {first} koel vanaf de andere kant van de ruimte.",
+   "{first} schraapt de keel. \"Als u vragen heeft, stel ze dan gewoon, in plaats van overal aan te zitten.\""
+  ],
+  "living.pulse": [
+   "Buiten klinken voetstappen en gedempte stemmen; {city} gaat gewoon door terwijl jij de sporen volgt.",
+   "De wind trekt even langs de gevels van {city}. Een paar voorbijgangers werpen een nieuwsgierige blik naar binnen.",
+   "Ergens verderop slaat een klok. In {city} voelt het alsof mensen zachter praten zodra je langs loopt.",
+   "Het licht verandert merkbaar; de dag in {city} glijdt rustig voort."
+  ],
+  "pressure.cue": [
+   "U alweer? Ik dacht dat we dit al besproken hadden.",
+   "Ik heb eerlijk gezegd weinig tijd. Waarom blijft u maar om mij heen draaien?",
+   "Mensen kijken me al na sinds u vragen stelt. Zeg maar kort wat u nog wilt.",
+   "U houdt me behoorlijk in de gaten, merk ik. Laten we dit snel afhandelen."
+  ],
+  "pressure.rumor": [
+   "Een voorbijganger fluistert dat {first} hier kort geleden opvallend haastig vertrok richting {place}.",
+   "Iemand bij de deur merkt terloops op dat {first} er gespannen uitzag en plots naar {place} liep.",
+   "\"Als je {first} zoekt,\" zegt iemand zacht, \"{hij} ging net met grote passen richting {place}.\""
+  ],
+  "final.deny": [
+   "\"Dat meent u niet,\" zegt {first} met een kille glimlach. \"Een grote beschuldiging, maar zonder enig hard bewijs blijft het los zand.\"",
+   "{first} trekt de schouders recht en kijkt je strak aan. \"U vergist zich schromelijk. Zeg maar waar u dat vandaan haalt.\"",
+   "\"Een gewaagde gok,\" antwoordt {first} rustig. \"Maar de hele stad weet dat gissen nog geen bewijs is.\""
+  ],
+  "final.motive": [
+   "{first} verstrakt even bij het zien van {title}, maar herpakt zich snel. \"Zelfs al speelde er iets — dat bewijst nog niet dat ik het heb gedaan.\"",
+   "De blik van {first} glijdt langs {title}. \"U stapelt vermoedens op elkaar. Een motief hebben is iets heel anders dan een daad plegen.\"",
+   "\"Mooie verhalen rond {title},\" zegt {first} met een scherp randje in de stem. \"Maar hoe had ik dat volgens u dan moeten doen?\""
+  ],
+  "final.surrender": [
+   "Zodra je {title} op tafel legt, valt er een lange stilte. De schouders van {first} zakken. \"Genoeg,\" fluistert {hij}. \"U heeft gelijk. Ik dacht dat niemand dat verband nog zou leggen.\"",
+   "{first} staart naar {title} en zoekt naar een uitweg, maar elk woord stokt. \"Het is voorbij,\" zegt {hij} zacht. \"U heeft mij klemgezet. Ik geef het toe.\"",
+   "Een diepe zucht ontsnapt aan {first} bij het zien van {title}. \"Dan heeft ontkennen geen zin meer,\" klinkt het gelaten. \"U heeft het hele spoor blootgelegd.\""
+  ],
+  "final.hero": [
+   "Een zucht van opluchting gaat door {city}. Dankzij jouw vasthoudendheid valt de sluier weg en keert de rust terug.",
+   "Omstanders knikken je met zichtbaar respect toe. Zonder jouw speurwerk had de waarheid in {city} nooit het daglicht gezien.",
+   "Het nieuws gaat als een lopend vuurtje door {city}: jij hebt het raadsel ontrafeld en de stad van een zware last bevrijd."
+  ],
+  "final.refute.person": [
+   "{first} schudt het hoofd en wijst rustig naar je verslag. \"U wijst naar de verkeerde persoon. Dit spoor past simpelweg niet bij mij — zoek beter voordat u mijn naam beschadigt.\""
+  ],
+  "final.refute.motive": [
+   "{first} tikt op {title} in je verslag. \"Dit stuk toont helemaal geen drijfveer tegen mij aan. Zonder steekhoudend motief houdt uw hele verhaal geen stand.\""
+  ],
+  "final.refute.method": [
+   "{first} glimlacht triomfantelijk bij {title}. \"Mooi geprobeerd, maar dat bewijst niets over hoe de daad is gepleegd of waar ik was. Kom maar terug met echt bewijs.\""
+  ],
+  "final.refute.mismatch": [
+   "{first} kijkt hoofdschuddend naar de twee stukken in je verslag. \"U haalt drijfveer en werkwijze door elkaar. Met zo'n rommelig dossier overtuigt u niemand in {city}.\""
+  ],
   "end.quality.0": [
    "Het kostte veel, misschien te veel.",
    "De zaak is gesloten, maar het voelt niet als een overwinning."

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Het Spoor — Geautomatiseerde browser- & a11y-teststraat (v0.18.0, Fase H)
+ * Het Spoor — Geautomatiseerde browser- & a11y-teststraat (v0.19.0, Fase I)
  * 100% zero-dependency (pure Node.js >= 22 + lokaal geïnstalleerde Chromium/Chrome via CDP).
  *
  * Controleert:
@@ -11,8 +11,9 @@
  *  3. ARIA & focus-traps (#modal Tab/Shift+Tab/Escape + focusherstel, #peek boven #modal, status/progressbar)
  *  4. WCAG AA kleurcontrast in zowel licht als donker thema (echte berekende kleuren met alpha-compositing)
  *  5. Responsieve viewports (1280x820, 768x1024 iPad staand, 640x420 200% zoom, 390x844 smal, xlarge + plain font)
- *  6. Kern-gameplayflow end-to-end (koude opening, bezoek, onderzoek, verhoor, zaakbord-notities/draadjes,
- *     Spoorboek, Verdachtenoverzicht, Spoorkaart, Save.MIGRATIONS schema 8->9 via Systeem, Zaakverslag)
+ *  6. Kern-gameplayflow end-to-end (koude opening, 2-staps voorwerpen, vloeiend 1 uur wachten, verhoor,
+ *     draadjes boven kaarten + laagkeuze, Spoorboek, Verdachtenoverzicht, Spoorkaart,
+ *     Save.MIGRATIONS schema 8->10 via Systeem, Zaakverslag & live 3-slags eindconfrontatie)
  *
  * Gebruik: node tests/browser-a11y.mjs
  * Optioneel: CHROME_PATH=/pad/naar/chromium node tests/browser-a11y.mjs
@@ -427,8 +428,8 @@ async function run() {
     })()`);
     check(
       'Service Worker actief, precacht alle kernbestanden met cache-versioning en reageert op GET_VERSION',
-      swInfo.state === 'activated' && swInfo.ver && swInfo.ver.version === 'v0.18.0' &&
-      swInfo.hasCore && swInfo.cacheNames.includes('het-spoor-v0.18.0'),
+      swInfo.state === 'activated' && swInfo.ver && swInfo.ver.version === 'v0.19.0' &&
+      swInfo.hasCore && swInfo.cacheNames.includes('het-spoor-v0.19.0'),
       `cache=${swInfo.ver && swInfo.ver.cache}, bestanden=${swInfo.cachedCount}`
     );
 
@@ -566,27 +567,30 @@ async function run() {
       `hotspots=${visitA11y.hotspots}`
     );
 
-    // Examine an object in the logies
+    // 2-step object inspection: free first impression before spending time on Grondig onderzoeken
     const examRes = await tab.evalJs(`(() => {
       const min0 = UI.s.clock.min;
       const objHs = document.querySelector('#app svg.tab .hs.obj[data-hs]');
       if (!objHs) return { ok: false };
       objHs.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      const popNote = document.querySelector('#app .tv-pop .sp-note')?.textContent?.trim() || '';
+      const freeGlance = popNote.length > 10 && UI.s.clock.min === min0;
       const btn = document.querySelector('[data-ui="examine"]');
-      if (!btn) return { ok: false };
+      if (!btn) return { ok: false, freeGlance };
+      const btnTxt = btn.textContent || '';
       btn.click();
-      return { ok: UI.s.clock.min > min0, min0, min1: UI.s.clock.min };
+      return { ok: freeGlance && btnTxt.includes('Grondig onderzoeken') && UI.s.clock.min > min0, freeGlance, min0, min1: UI.s.clock.min };
     })()`);
     check(
-      'Gameplay: voorwerp onderzoeken in Tableau kost tijd en werkt klok bij',
+      'Gameplay (v0.19.0): 2-staps voorwerp — gratis eerste indruk (0 min), daarna Grondig onderzoeken kost tijd',
       examRes.ok,
-      `${examRes.min0} → ${examRes.min1} min`
+      `glance=${examRes.freeGlance}, ${examRes.min0} → ${examRes.min1} min`
     );
 
     // Force visit with a known cast member, start interrogation, check progressbar & contrast, ask alibi, end talk
     await tab.evalJs(`(() => {
       const npc = UI.s.cast[0];
-      const locId = Schedule.at(UI.s, npc.id, UI.s.clock.day, UI.s.clock.part);
+      const locId = Schedule.atMin(UI.s, npc.id, UI.s.clock.day, Clock.norm(UI.s));
       Act.leave(UI.s);
       Act.force(UI.s, locId);
       Act.talkStart(UI.s, npc.id);
@@ -657,6 +661,38 @@ async function run() {
       'Zaakbord: kaartselectie, #cardNote focusbehoud, statusmarkering en draadje trekken',
       boardFlow.ok,
       JSON.stringify(boardFlow)
+    );
+
+    // Fase I: Pin-to-pin threads above cards (z-index 3 > 2), layer toggle (over/under/off) & smooth 1-hour wait
+    const threadWaitRes = await tab.evalJs(`(() => {
+      const svg = document.querySelector('#app .bd svg.bt');
+      const grid = document.querySelector('#app .bd .bd-grid');
+      const zOver = svg ? getComputedStyle(svg).zIndex : '';
+      const zGrid = grid ? getComputedStyle(grid).zIndex : '';
+      const hasHalo = Boolean(svg && svg.querySelector('path.th-halo'));
+      const btn = document.querySelector('#app [data-ui="thlayer"]');
+      if (!btn) return { ok: false, reason: 'geen thlayer knop' };
+      btn.click();
+      const zUnder = getComputedStyle(document.querySelector('#app .bd svg.bt')).zIndex;
+      document.querySelector('#app [data-ui="thlayer"]').click();
+      const dOff = getComputedStyle(document.querySelector('#app .bd svg.bt')).display;
+      document.querySelector('#app [data-ui="thlayer"]').click();
+      const zBack = getComputedStyle(document.querySelector('#app .bd svg.bt')).zIndex;
+      // Smooth 1-hour wait button
+      const min0 = Clock.norm(UI.s);
+      const wBtn = document.querySelector('#app [data-ui="wait"]');
+      const wTxt = wBtn ? wBtn.textContent : '';
+      if (wBtn) wBtn.click();
+      const min1 = Clock.norm(UI.s);
+      return {
+        ok: zOver === '3' && zGrid === '2' && hasHalo && zUnder === '1' && dOff === 'none' && zBack === '3' && wTxt.includes('Wacht 1 uur') && min1 === min0 + 60,
+        zOver, zGrid, hasHalo, zUnder, dOff, zBack, min0, min1
+      };
+    })()`);
+    check(
+      'Fase I (v0.19.0): draadjes lopen boven kaarten (punaise-naar-punaise + laagkeuze) en Wacht 1 uur verloopt vloeiend',
+      threadWaitRes.ok,
+      JSON.stringify(threadWaitRes)
     );
 
     // Re-select a card so drawer is also visible during contrast check
@@ -820,12 +856,13 @@ async function run() {
     );
 
     /* =====================================================================
-       7. Save.MIGRATIONS end-to-end via Systeem-slot (schema 8 -> 9) & weigering schema 6
+       7. Save.MIGRATIONS end-to-end via Systeem-slot (schema 8 -> 10) & weigering schema 6
        ===================================================================== */
     const migE2E = await tab.evalJs(`(async () => {
       const s8 = JSON.parse(Save.pack(UI.s));
       s8.schema = 8; s8.version = 'v0.12.0';
       delete s8.player.seen; delete s8.player.seenJournal; delete s8.play.knownSched; delete s8.play.warmTip;
+      delete s8.scheduleShift; delete s8.play.pressure; delete s8.play.divert;
       await Store.put('slot1', JSON.stringify(s8));
       await UI.system();
       const slotTxt = document.querySelector('#mBody .slot')?.textContent || '';
@@ -837,28 +874,84 @@ async function run() {
       let oldErr = '';
       try { Save.unpack(JSON.stringify(Object.assign({}, s8, { schema: 6 }))); } catch (e) { oldErr = e.message; }
       return {
-        slotShowsMig: slotTxt.includes('8 → 9'),
+        slotShowsMig: slotTxt.includes('8 → 10'),
         migratedSchema,
-        toastMentionsMig: toastTxt.includes('schema 8 naar 9'),
+        toastMentionsMig: toastTxt.includes('schema 8 naar 10'),
         oldErrOk: oldErr.includes('te oud')
       };
     })()`);
     check(
-      'Save-migratieketen in browser: schema-8 slot toont "8 → 9", migreert naar schema 9, en schema 6 weigert',
-      migE2E.slotShowsMig && migE2E.migratedSchema === 9 && migE2E.toastMentionsMig && migE2E.oldErrOk,
+      'Save-migratieketen in browser: schema-8 slot toont "8 → 10", migreert naar schema 10, en schema 6 weigert',
+      migE2E.slotShowsMig && migE2E.migratedSchema === 10 && migE2E.toastMentionsMig && migE2E.oldErrOk,
       JSON.stringify(migE2E)
     );
 
     /* =====================================================================
-       8. Zaakverslag openen & controleren
+       8. Zaakverslag (Wie / Waarom / Hoe) & live 3-slags Eindconfrontatie ("De Ontmaskering")
        ===================================================================== */
     const zvOk = await tab.evalJs(`(() => {
       document.querySelector('[data-ui="dossier"]').click();
       const open = !document.querySelector('#modal').hidden && document.querySelector('#mTitle').textContent.includes('Zaakverslag');
+      const tabsTxt = Array.from(document.querySelectorAll('#mBody .zv-tabs button')).map((b) => b.textContent).join('|');
       UI.close();
-      return open;
+      return { ok: open && tabsTxt.includes('1. Wie') && tabsTxt.includes('2. Waarom') && tabsTxt.includes('3. Hoe'), tabsTxt };
     })()`);
-    check('Zaakverslag opent en sluit foutloos', zvOk);
+    check('Zaakverslag (v0.19.0): toont heldere 1. Wie / 2. Waarom / 3. Hoe structuur', zvOk.ok, zvOk.tabsTxt);
+
+    // Live 3-beat Final Confrontation (both targeted refutation and winning surrender + hero moment + WCAG AA contrast)
+    const fcRes = await tab.evalJs(`(() => {
+      const backup = Save.pack(UI.s);
+      const solved = Solver.run(UI.s).state;
+      solved.cast.forEach((n) => { solved.play.met[n.id] = true; });
+      const cul = solved.truth.culpritId;
+      const other = solved.cast.find((n) => n.id !== cul).id;
+      const goodMot = solved.evidence.find((e) => e.slot === 'motive' && e.pointsTo === cul);
+      const goodMet = solved.evidence.find((e) => e.slot === 'method' && e.pointsTo === cul);
+
+      // 1) Refuted confrontation (wrong suspect)
+      UI.s = U.clone(solved);
+      UI.s.player.dossier = { suspectId: other, motiveEvidenceId: goodMot.id, methodEvidenceId: goodMet.id };
+      Act.startFinalConfront(UI.s);
+      UI.render(true);
+      const hasView0 = Boolean(document.querySelector('#app .fc-view'));
+      document.querySelector('#app [data-ui="fc-step"]')?.click();
+      document.querySelector('#app [data-ui="fc-step"]')?.click();
+      const refutedUi = Boolean(document.querySelector('#app .fc-view.fc-refuted') && document.querySelector('#app .fc-fail-hint') && document.querySelector('#app [data-ui="fc-revise"]'));
+
+      // 2) Winning confrontation (surrender + hero moment)
+      UI.s = U.clone(solved);
+      UI.s.player.dossier = { suspectId: cul, motiveEvidenceId: goodMot.id, methodEvidenceId: goodMet.id };
+      Act.startFinalConfront(UI.s);
+      UI.render(true);
+      document.querySelector('#app [data-ui="fc-step"]')?.click();
+      document.querySelector('#app [data-ui="fc-step"]')?.click();
+      const surrenderUi = Boolean(document.querySelector('#app .fc-view.fc-surrender') && document.querySelector('#app .iv-strip.hero') && document.querySelector('#app .fc-go.hero'));
+      window.__fcBackup = backup;
+      return { hasView0, refutedUi, surrenderUi };
+    })()`);
+    const fcSelectors = ['.fc-view .iv-badge', '.fc-view .iv-meta h3', '.fc-beats li b', '.fc-beats li small', '.fc-view .iv-line', '.fc-go.hero'];
+    await setTheme('light');
+    const fcLight = await tab.evalJs(`window.__checkContrast(${JSON.stringify(fcSelectors)})`);
+    await setTheme('dark');
+    const fcDark = await tab.evalJs(`window.__checkContrast(${JSON.stringify(fcSelectors)})`);
+    await setTheme('light');
+    const fcEndOk = await tab.evalJs(`(() => {
+      document.querySelector('#app [data-ui="fc-end"]')?.click();
+      const endOpen = !document.querySelector('#modal').hidden && document.querySelector('#mTitle').textContent.includes('De Ontknoping');
+      UI.close();
+      UI.s = Save.unpack(window.__fcBackup);
+      delete window.__fcBackup;
+      UI.tab = 'board'; UI.boardMode = 'board';
+      UI.render(true);
+      return endOpen;
+    })()`);
+    check(
+      'Eindconfrontatie "De Ontmaskering" (v0.19.0): 3 slagen, gerichte weerlegging, overgave + heldenmoment, eindverslag en WCAG AA contrast (licht & donker)',
+      fcRes.hasView0 && fcRes.refutedUi && fcRes.surrenderUi && fcEndOk && fcLight.fails.length === 0 && fcDark.fails.length === 0,
+      fcLight.fails.length || fcDark.fails.length
+        ? `light=${JSON.stringify(fcLight.fails)} dark=${JSON.stringify(fcDark.fails)}`
+        : `refuted=${fcRes.refutedUi}, surrender=${fcRes.surrenderUi}, ending=${fcEndOk}, contrast OK`
+    );
 
     /* =====================================================================
        9. Responsieve viewports & leesgemak (0 horizontale overloop)

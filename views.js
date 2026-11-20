@@ -362,6 +362,11 @@ const Board = {
     if (b.y + b.h <= a.y + 8) return [a.x + a.w / 2, a.y + 2];
     return [a.x + a.w - 2, a.y + a.h / 2];
   },
+  // v0.19.0 (Fase I): anchor directly on the top push-pin of each card so threads visibly span pin-to-pin
+  anchorPin(a, cardId) {
+    const yOff = cardId && cardId.indexOf('l:') === 0 ? 5 : 9;
+    return [a.x + a.w / 2, a.y + Math.min(yOff, a.h / 2)];
+  },
   path(a, b, kind) {
     const x1 = a[0], y1 = a[1], x2 = b[0], y2 = b[1], d = Math.hypot(x2 - x1, y2 - y1) || 1;
     if (kind !== 'clash' && kind !== 'solved') {
@@ -422,9 +427,10 @@ const Board = {
 
     if (c.kind === 'person') {
       const n = World.npc(s, c.ref), tone = Rels.toneOf(s, n.id), r = s.relations[n.id];
+      const pLbl = typeof Living !== 'undefined' ? Living.pressureLabel(s, n.id) : '';
       return `<div class="bc pc${clsExtra}" ${attr} style="${rotSt};--tone:${TONE_COLOR[tone]};--phbg:${F.photo}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
         `<div class="pc-body"><div class="ph">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 68 })}</div>` +
-        `<div class="pt"><b>${U.esc(n.name)}</b><span>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</span>${n.kenmerk ? `<span class="km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : ''}<i>${U.esc(r.statusText)}${s.play.cleared[n.id] && Level.get(s).checkLabel ? '. Alibi bevestigd.' : ''}</i></div></div>${ex.foot}</div>`;
+        `<div class="pt"><b>${U.esc(n.name)}</b><span>${U.esc(n.role.replace(/ \(.*\)$/, ''))}</span>${n.kenmerk ? `<span class="km">${U.esc(KENMERK[n.kenmerk].label)}</span>` : ''}${pLbl ? `<span class="bc-press">${U.esc(pLbl)}</span>` : ''}<i>${U.esc(r.statusText)}${s.play.cleared[n.id] && Level.get(s).checkLabel ? '. Alibi bevestigd.' : ''}</i></div></div>${ex.foot}</div>`;
     }
     // v0.12.0: blank cards: a plain outline, the name and where you heard it; nothing else
     if (c.kind === 'ghost') {
@@ -445,12 +451,13 @@ const Board = {
     }
     if (c.kind === 'doc') {
       const e = Evidence.get(s, c.ref), loc = World.loc(s, e.source.locationId), obj = loc.objects.find((o) => o.id === e.source.objectId), kind = F.kinds[parseInt(RNG.hashStr(e.key), 36) % F.kinds.length];
-      return `<div class="bc doc${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}<div class="dk">${kind}</div><b>${U.esc(e.title)}${s.play.debunked[e.id] ? ' (weerlegd)' : ''}</b>` +
+      const role = Evidence.roleInfo(e);
+      return `<div class="bc doc${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}<div class="dk">${U.esc(role.short)} · ${U.esc(kind)}</div><b>${U.esc(e.title)}${s.play.debunked[e.id] ? ' (weerlegd)' : ''}</b>` +
         `<p>${U.esc(Rnd.cap(e.item || (obj ? obj.name : '')))}</p><small>${U.esc(loc.name)}</small>${ex.foot}</div>`;
     }
     if (c.kind === 'claim' || c.kind === 'talk') {
       const con = c.kind === 'claim' ? s.contradictions.find((x) => x.id === c.ref) : null, e = con ? null : Evidence.get(s, c.ref);
-      const who = World.npc(s, con ? con.npcId : (e.source.npcId || '')), text = con ? con.claim : e.text, title = con ? 'Verklaring van ' + who.name : e.title;
+      const who = World.npc(s, con ? con.npcId : (e.source.npcId || '')), text = con ? con.claim : e.text, title = con ? 'Verklaring van ' + who.name : e.title + ' · ' + Evidence.roleInfo(e).short;
       const wTone = who && s.play.met[who.id] ? Rels.toneOf(s, who.id) : 'neutral';
       const stamp = con && s.play.resolved[con.id] ? '<span class="stamp">doorgeprikt</span>' : e && e.source.type === 'confront' ? '<span class="stamp">bekentenis</span>' : '';
       return `<div class="bc st${stamp ? ' stamped' : ''}${clsExtra}" ${attr} style="${rotSt}"><div class="pin" aria-hidden="true"></div>${ex.badges}` +
@@ -460,12 +467,14 @@ const Board = {
     const l = World.loc(s, c.ref);
     return `<div class="bc tk${clsExtra}" ${attr} style="${rotSt}"><i style="background:${TEMPLATE_COLOR[l.template] || '#fff'}" aria-hidden="true"></i><span>${U.esc(l.name)}</span>${ex.hasNew ? '<span class="bc-new">Nieuw</span>' : ''}${ex.mark ? `<span class="bc-mark m-${ex.mark}" aria-hidden="true">${Pins.MARKS[ex.mark].icon}</span>` : ''}</div>`;
   },
-  // top toolbar of the board: switch between Prikbord, Verdachtenoverzicht and Spoorboek, plus link-mode, "Alles gezien" & optional hint controls
-  bar(s, mode, link, threadKind) {
+  // top toolbar of the board: switch between Prikbord, Verdachtenoverzicht and Spoorboek, plus link-mode, thread-layer toggle, "Alles gezien" & optional hint controls
+  bar(s, mode, link, threadKind, threadLayer) {
     const metN = s.cast.filter((n) => s.play.met[n.id]).length;
     const sbN = typeof Spoorboek !== 'undefined' && Spoorboek.count ? Spoorboek.count(s) : 0;
     const newN = Pins.newIds(s).length;
     const tk = threadKind && Pins.THREAD_KINDS[threadKind] ? threadKind : 'verband';
+    const tl = ['over', 'under', 'off'].indexOf(threadLayer) >= 0 ? threadLayer : 'over';
+    const tlLabel = tl === 'over' ? 'Draadjes: boven' : tl === 'under' ? 'Draadjes: achter' : 'Draadjes: uit';
     const hintBtn = !s.play.ended && Level.id(s) !== 'moeilijk' ? `<button type="button" class="bd-hint-btn" data-ui="hint">Geef een zetje</button>` : '';
     const isBoard = mode !== 'matrix' && mode !== 'timeline';
     let right = '';
@@ -479,6 +488,7 @@ const Board = {
       const tCount = Pins.threads(s).length;
       right = `<div class="bd-meta">` +
         (isBoard && tCount > 0 ? `<span class="bd-tstat">${tCount} ${tCount === 1 ? 'eigen draadje' : 'eigen draadjes'}</span>` : '') +
+        (isBoard ? `<button type="button" class="bd-layer-btn" data-ui="thlayer" title="Wissel of draadjes over de punaises lopen, achter de kaarten of verborgen zijn">${tlLabel}</button>` : '') +
         (isBoard && newN > 0 ? `<button type="button" class="bd-seen-btn" data-ui="seen-all">Alles gezien (${newN})</button>` : '') +
         hintBtn +
         `</div>`;
@@ -494,19 +504,20 @@ const Board = {
   html(s, fam, sel, link, opt) {
     const L = this.layout(s), byId = {}; L.cards.forEach((c) => { byId[c.id] = c; });
     const mode = (opt && opt.mode) || 'board', threadKind = (opt && opt.threadKind) || 'verband';
+    const threadLayer = (opt && opt.threadLayer) || 'over';
     if (link && !byId[link]) link = null;
     if (mode === 'matrix') {
-      return { html: this.bar(s, 'matrix', null, threadKind) + this.matrix(s, fam, sel), L: L };
+      return { html: this.bar(s, 'matrix', null, threadKind, threadLayer) + this.matrix(s, fam, sel), L: L };
     }
     if (mode === 'timeline') {
       const M = (opt && opt.map) || Travel.map(s);
-      return { html: this.bar(s, 'timeline', null, threadKind) + Spoorboek.html(s, M, (opt && opt.sbSel) || []), L: L };
+      return { html: this.bar(s, 'timeline', null, threadKind, threadLayer) + Spoorboek.html(s, M, (opt && opt.sbSel) || []), L: L };
     }
     const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel && byId[sel] ? this.linked(s, L, sel) : null;
     if (link) sel = link;
     const foldersByZone = {}; this.folders(s).forEach((f) => { foldersByZone[f.zone] = f.n; });
-    let h = this.bar(s, 'board', link, threadKind);
-    h += `<div class="bd${link ? ' linking' : hl ? ' focus' : ''}">`;
+    let h = this.bar(s, 'board', link, threadKind, threadLayer);
+    h += `<div class="bd${link ? ' linking' : hl ? ' focus' : ''}" data-threads="${U.esc(threadLayer)}">`;
     h += `<svg class="bt" aria-hidden="true"></svg>`;
     h += `<div class="bd-grid">`;
     this.ZONES.forEach((z) => {
@@ -658,21 +669,23 @@ const Board = {
         if (chk && Level.get(s).checkLabel) h += `<p class="sp-note">${link((String(chk.by).indexOf('obj:') === 0 ? 'Bevestigd door een gevonden stuk' : 'Gecontroleerd bij ' + World.npc(s, chk.by).name) + ': ' + (chk.ok ? 'klopt' : 'klopt niet') + '.')}</p>`;
       }
       h += this.schedHtml(s, n.id);
-      const now = Schedule.at(s, n.id, s.clock.day, s.clock.part);
-      h += `<p class="sp-note">${s.clock.part >= DAY.parts ? 'Het is nacht; iedereen is thuis.' : 'Nu, in de ' + PARTS[s.clock.part] + ': ' + link(World.loc(s, now).name) + '.'}</p>`;
+      const pLbl = typeof Living !== 'undefined' ? Living.pressureLabel(s, n.id) : '';
+      if (pLbl) h += `<p class="sp-note"><b>Gedrag:</b> ${U.esc(U.first(n))} ${U.esc(pLbl)} door het lopende onderzoek.</p>`;
+      const nowMin = Clock.norm(s), now = nowMin < NIGHT ? Schedule.atMin(s, n.id, s.clock.day, nowMin) : null;
+      h += `<p class="sp-note">${!now ? 'Het is nacht; iedereen is thuis.' : 'Nu (' + U.hm(nowMin) + '): ' + link(World.loc(s, now).name) + '.'}</p>`;
     } else if (k === 'case') {
       h += `<h3>${U.esc(s.meta.title)}</h3><p>${link(s.crime.summary)}</p><p>${link(s.crime.personalHook)}</p><p>${link(s.evidence[0].text)}</p><p class="sp-note">${link(s.meta.settingSummary || '')}</p>`;
     } else if (k === 'l') {
-      const l = World.loc(s, ref), open = PARTS.slice(0, DAY.parts).filter((x, i) => World.openAt(l, i));
-      h += `<h3>${U.esc(l.name)}</h3><p>${U.esc(l.description)}</p><p class="sp-note">Open in de ${open.join(', ') || 'geen enkel dagdeel'}.</p>`;
+      const l = World.loc(s, ref), nowMin = Clock.norm(s), isOpenNow = World.openAtMin(l, nowMin);
+      h += `<h3>${U.esc(l.name)}</h3><p>${U.esc(l.description)}</p><p class="sp-note">Open van ${String(l.open[0]).padStart(2, '0')}:00 tot ${String(Math.min(24, l.open[1])).padStart(2, '0')}:00 (${nowMin >= NIGHT ? 'nu nacht' : isOpenNow ? 'nu open' : 'nu gesloten'}).</p>`;
       const T = Travel.check(s, l.id);
       if (!s.visit && !s.play.ended && T.open && !T.late) h += `<button type="button" class="sp-btn" data-sp="visit" data-v="${l.id}">${T.here ? 'Ga naar binnen' : 'Ga erheen (' + T.walk + ' min, aankomst ' + U.hm(T.at) + ')'}</button>`;
     } else if (k === 's' && ref.indexOf('con_') === 0) {
       const c = s.contradictions.find((x) => x.id === ref), n = World.npc(s, c.npcId);
       h += `<h3>Verklaring van ${link(n.name)}</h3><p>${link(c.claim)}</p>` + (s.play.resolved[c.id] ? `<p class="sp-note">Doorgeprikt.${c.reveal ? ' ' + link(c.reveal) : ''}</p>` : `<p class="sp-note">Nog niet getoetst.</p>`);
     } else {
-      const e = Evidence.get(s, ref);
-      h += `<h3>${U.esc(e.title)}</h3><p>${link(e.text)}</p>`;
+      const e = Evidence.get(s, ref), role = Evidence.roleInfo(e);
+      h += `<h3>${U.esc(e.title)}</h3><p class="sp-role-tag"><b>${U.esc(role.pillar)}:</b> ${U.esc(role.help)}</p><p>${link(e.text)}</p>`;
       if (e.source.type === 'object') { const l = World.loc(s, e.source.locationId); h += `<p class="sp-note">Gevonden: ${link(l.name)}, ${U.esc(l.objects.find((o) => o.id === e.source.objectId).name)}.</p>`; }
       if (e.source.npcId) h += `<p class="sp-note">Bron: ${link(World.npc(s, e.source.npcId).name)}.</p>`;
       if (s.play.debunked[e.id]) h += '<p class="sp-note">Weerlegd.</p>';
@@ -989,11 +1002,14 @@ const MapGen = {
   unknownBadges: (n) => n <= 0 ? [] : n === 1 ? ['?'] : n <= 3 ? [n + ' ?'] : ['3+ ?'],
   svg(s, M, part, sel) {
     const P = M.pos, met = s.cast.filter((n) => s.play.met[n.id]).sort(byName), here = s.visit ? s.visit.locId : s.pos || null;
+    const useNow = part === s.clock.part && typeof Clock !== 'undefined', nowMin = useNow ? Clock.norm(s) : null;
+    const isLocOpen = (l) => useNow ? World.openAtMin(l, nowMin) : World.openAt(l, part);
+    const isAt = (id, lid) => (useNow ? Schedule.atMin(s, id, s.clock.day, nowMin) : Schedule.at(s, id, s.clock.day, part)) === lid;
     const crimeLocId = s.crime && s.crime.crimeLocationId, victimLocId = s.crime && s.crime.victimLocationId;
     const vFirst = s.crime && s.crime.victim ? U.first(s.crime.victim) : 'slachtoffer';
     let h = `<svg viewBox="0 0 ${this.W} ${this.H}" preserveAspectRatio="xMidYMid meet" role="group" aria-label="Stadskaart">` + this.ground(M);
     s.world.locations.forEach((l) => {
-      const p = P[l.id], open = World.openAt(l, part), up = p.above, tw = l.name.length * 8.4;
+      const p = P[l.id], open = isLocOpen(l), up = p.above, tw = l.name.length * 8.4;
       const lx = Math.max(tw / 2 + 8, Math.min(this.W - tw / 2 - 8, p.x)), ly = up ? p.y - 24 : p.y + 36;
       const isCrime = l.id === crimeLocId, isVic = l.id === victimLocId;
       const ariaExtra = (isCrime ? ', plaats van het voorval' : '') + (isVic ? ', plek van ' + s.crime.victim.name : '') + (open ? '' : ', gesloten');
@@ -1008,10 +1024,10 @@ const MapGen = {
       if (isCrime) h += `<g transform="translate(${p.x - 16} ${p.y - 15})"><title>Plaats van het voorval (${U.esc(l.name)})</title><circle r="8" fill="#b3312a" stroke="var(--sp-mapbg)" stroke-width="2"/><path d="M-3.2 -3.2 L3.2 3.2 M3.2 -3.2 L-3.2 3.2" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></g>`;
       if (isVic) h += `<g transform="translate(${p.x + 16} ${p.y - 15})"><title>Werk/woning van ${U.esc(s.crime.victim.name)}</title><rect x="-6.5" y="-6.5" width="13" height="13" rx="2" transform="rotate(45)" fill="#c48a1c" stroke="var(--sp-mapbg)" stroke-width="2"/><circle r="2" fill="#fff"/></g>`;
       h += `<text class="lbl" x="${lx.toFixed(1)}" y="${ly}" text-anchor="middle">${U.esc(l.name)}</text>`;
-      if (!open) h += `<text class="sub" x="${lx.toFixed(1)}" y="${up ? ly - 17 : ly + 16}" text-anchor="middle">${part >= DAY.parts ? 'dicht, het is nacht' : 'dicht in de ' + PARTS[part]}</text>`;
+      if (!open) h += `<text class="sub" x="${lx.toFixed(1)}" y="${up ? ly - 17 : ly + 16}" text-anchor="middle">${part >= DAY.parts ? 'dicht, het is nacht' : 'open ' + l.open[0] + '–' + l.open[1] + ' uur'}</text>`;
       // v0.16.0: calm badge strip: up to 3 met core suspects (+N overflow) and at most 1 compact unknown badge (met extras stay in stnDetail)
-      const presentAll = open ? s.cast.concat(s.crowd).filter((n) => Schedule.at(s, n.id, s.clock.day, part) === l.id) : [];
-      const who = met.filter((n) => open && Schedule.at(s, n.id, s.clock.day, part) === l.id), fig = presentAll.filter((n) => !People.isCore(s, n.id) && People.known(s, n.id));
+      const presentAll = open ? s.cast.concat(s.crowd).filter((n) => isAt(n.id, l.id)) : [];
+      const who = met.filter((n) => open && isAt(n.id, l.id)), fig = presentAll.filter((n) => !People.isCore(s, n.id) && People.known(s, n.id));
       const unk = Math.max(0, presentAll.length - who.length - fig.length);
       const badges = who.slice(0, 3).map((n) => ({ kind: 'met', n: n, w: 18 }));
       if (who.length > 3) badges.push({ kind: 'met-more', n: who.length - 3, names: who.slice(3).map((n) => n.name).join(', '), w: 22 });
@@ -1037,7 +1053,7 @@ const MapGen = {
     h += `<circle cx="22" cy="46" r="6" fill="none" stroke="var(--sp-thread)" stroke-width="2.8"/><text x="34" y="50">logies</text>`;
     h += `<circle cx="104" cy="46" r="6.5" fill="#b3312a"/><path d="M101.5 43.5 L106.5 48.5 M106.5 43.5 L101.5 48.5" stroke="#fff" stroke-width="1.6"/><text x="116" y="50">plaats delict</text>`;
     h += `<rect x="217" y="41" width="10" height="10" rx="1.5" transform="rotate(45 222 46)" fill="#c48a1c"/><text x="234" y="50">plek v. ${U.esc(vFirst)}</text>`;
-    h += `<rect x="13" y="64" width="28" height="16" rx="8" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.4" stroke-dasharray="2.5 2"/><text x="27" y="75.5" text-anchor="middle" font-size="9" font-weight="700" fill="var(--sp-ink)">2 ?</text><text x="48" y="76" font-size="12">onbekenden (3+ ? is meer dan drie) · dag ${s.clock.day}, ${PARTS[part]}</text>`;
+    h += `<rect x="13" y="64" width="28" height="16" rx="8" fill="var(--sp-panel)" stroke="var(--sp-mute)" stroke-width="1.4" stroke-dasharray="2.5 2"/><text x="27" y="75.5" text-anchor="middle" font-size="9" font-weight="700" fill="var(--sp-ink)">2 ?</text><text x="48" y="76" font-size="12">onbekenden · dag ${s.clock.day}, ${useNow ? U.hm(nowMin) : PARTS[part]}</text>`;
     h += `<text x="14" y="98" fill="var(--sp-mute)" font-size="11">Tik op een plek voor details. Lopen kost 15 tot 45 minuten.</text></g>`;
     return h + '</svg>';
   },
@@ -1092,7 +1108,10 @@ const Tableau = {
     return 'crate';
   },
   model(s, locId, part) {
-    const loc = World.loc(s, locId), open = World.openAt(loc, part), k = this.kindOf(loc.template), hs = [], at = (x) => Schedule.at(s, x.id, s.clock.day, part) === loc.id;
+    const loc = World.loc(s, locId), useNow = part === s.clock.part && typeof Clock !== 'undefined', nowMin = useNow ? Clock.norm(s) : null;
+    const open = useNow ? World.openAtMin(loc, nowMin) : World.openAt(loc, part);
+    const k = this.kindOf(loc.template), hs = [];
+    const at = (x) => (useNow ? Schedule.atMin(s, x.id, s.clock.day, nowMin) : Schedule.at(s, x.id, s.clock.day, part)) === loc.id;
     // v0.8.0 (nieuw A): core people and figuranten share one shuffled line-up, so where someone stands says nothing
     const all = open ? s.cast.filter(at).concat(s.crowd.filter(at)).sort((a, b) => a.id.localeCompare(b.id)) : [], mix = Rnd.pickN(RNG.make(s.seed + '|stage|' + loc.id + '|' + s.clock.day + '|' + part), all, all.length);
     const extra = Math.max(0, mix.length - 11);
@@ -1452,10 +1471,12 @@ const Interrogation = {
     const bar = (key, lab, val, col) =>
       `<div class="iv-rrow"><span>${lab} ${dBadge(key)}</span><i role="progressbar" aria-label="${lab}" aria-valuenow="${val}" aria-valuemin="0" aria-valuemax="100" style="--v:${val}%;--c:${col}"></i><small class="rel-val">${val}</small></div>`;
 
+    const pLbl = typeof Living !== 'undefined' ? Living.pressureLabel(s, npc.id) : '';
+    const stanceShow = pLbl && stance < 1 ? 1 : stance;
     const left = `<aside class="iv-left" style="--tone:${TONE_COLOR[tone]};--phbg:${F.photo}">
-      <div class="iv-frame" data-tone="${tone}" data-stance="${STANCE_LABEL[stance]}">
-        <div class="iv-badge">${U.esc(TONE_WORD[tone])} · houding: ${STANCE_LABEL[stance]}</div>
-        <div class="iv-sil">${Silhouette.svg(npc, { s: s, fam: fam, mode: 'full', tone: tone, stance: stance, w: 176 })}</div>
+      <div class="iv-frame" data-tone="${tone}" data-stance="${STANCE_LABEL[stanceShow]}">
+        <div class="iv-badge">${U.esc(TONE_WORD[tone])} · houding: ${STANCE_LABEL[stanceShow]}${pLbl ? ' · ' + U.esc(pLbl) : ''}</div>
+        <div class="iv-sil">${Silhouette.svg(npc, { s: s, fam: fam, mode: 'full', tone: tone, stance: stanceShow, w: 176 })}</div>
       </div>
       <div class="iv-meta">
         <h3>${U.esc(npc.name)}</h3>
@@ -1507,7 +1528,7 @@ const Interrogation = {
         </div>
         <div class="iv-evcards">
           ${boardEvs.map((e) => `<button type="button" class="iv-evcard" data-ui="playev" data-v="${U.esc(e.id)}">
-            <span class="pin"></span><small>${U.esc(e.slot === 'motive' ? 'Motief' : e.slot === 'method' ? 'Werkwijze' : 'Bewijsstuk')}</small>
+            <span class="pin"></span><small>${U.esc(Evidence.roleInfo(e).short)}</small>
             <b>${U.esc(e.title)}</b>
           </button>`).join('') || '<p class="sp-note">Je hebt nog geen bruikbare bewijsstukken op het bord.</p>'}
         </div>
@@ -1540,6 +1561,61 @@ const Interrogation = {
     </section>`;
 
     return `<div class="iv">${left}${right}</div>`;
+  }
+};
+
+/* ---------------- FinalConfrontView (v0.19.0, Fase I): live 3-beat unmasking with signed Zaakverslag ---------------- */
+const FinalConfrontView = {
+  html(s, fam) {
+    const fc = s && s.play && s.play.finalConfront;
+    if (!fc) return '';
+    const sus = World.npc(s, fc.suspectId), mot = Evidence.get(s, fc.motiveEvidenceId), met = Evidence.get(s, fc.methodEvidenceId);
+    const loc = World.loc(s, fc.locId), F = FAMILY[fam];
+    if (!sus || !mot || !met) return '';
+    const tone = fc.outcome === 'surrender' ? 'cold' : fc.step >= 1 || fc.outcome === 'refuted' ? 'hostile' : 'neutral';
+    const stance = fc.outcome === 'surrender' ? 0 : fc.step >= 1 ? 2 : 1;
+    const badge = fc.outcome === 'surrender' ? 'Overgegeven · Zaak opgelost!' : fc.outcome === 'refuted' ? 'Weerlegd · Verslag wankelt' : fc.step === 0 ? 'Ontkent zelfverzekerd' : 'Zichtbaar onder druk';
+    const beats = [
+      { n: 1, title: 'Wie (Beschuldiging)', sub: sus.name, done: true },
+      { n: 2, title: 'Waarom (Motief)', sub: mot.title, done: fc.step >= 1 },
+      { n: 3, title: 'Hoe (Werkwijze / alibi)', sub: met.title, done: fc.step >= 2 }
+    ];
+    const logHtml = fc.log.map((entry) => {
+      const spk = entry.who === 'you' ? U.first(s.protagonist) : entry.who === 'npc' ? sus.name : entry.who === 'hero' ? s.world.city.name : 'Confrontatie';
+      const cls = entry.who === 'you' ? 'ask' : entry.who === 'npc' ? 'npc ' + tone : entry.who === 'hero' ? 'hero' : 'narr';
+      return `<div class="iv-strip ${cls}"><span class="iv-spk">${U.esc(spk)}</span><div class="iv-lines"><p class="iv-line">${U.esc(entry.text)}</p></div></div>`;
+    }).join('');
+
+    let actionHtml = '';
+    if (!fc.outcome && fc.step === 0) {
+      actionHtml = `<button type="button" class="fc-go" data-ui="fc-step">Leg Waarom op tafel: ${U.esc(mot.title)}</button>` +
+        `<button type="button" class="sp-btn" data-ui="fc-back">Breek af &amp; keer terug</button>`;
+    } else if (!fc.outcome && fc.step === 1) {
+      actionHtml = `<button type="button" class="fc-go" data-ui="fc-step">Leg Hoe op tafel (sluitstuk): ${U.esc(met.title)}</button>`;
+    } else if (fc.outcome === 'surrender') {
+      actionHtml = `<button type="button" class="fc-go hero" data-ui="fc-end">Lees het volledige eindverslag &amp; epiloog</button>`;
+    } else {
+      const hint = fc.failKind === 'person' ? 'Tip: de beschuldigde persoon klopt niet met alle sporen.' :
+        fc.failKind === 'motive' ? 'Tip: het gekozen motief-bewijs (Waarom) houdt geen stand.' :
+        fc.failKind === 'method' ? 'Tip: het gekozen werkwijze-/alibi-bewijs (Hoe) houdt geen stand.' :
+        'Tip: controleer of je Waarom (motief) en Hoe (werkwijze/alibi) in het juiste vak hebt gezet.';
+      actionHtml = `<p class="fc-fail-hint">${U.esc(hint)}</p><div class="fc-act-row">` +
+        `<button type="button" class="fc-go" data-ui="fc-revise">Pas zaakverslag aan</button>` +
+        `<button type="button" class="sp-btn" data-ui="fc-back">Terug naar het zaakbord</button></div>`;
+    }
+
+    return `<div class="iv fc-view${fc.outcome ? ' fc-' + fc.outcome : ''}">` +
+      `<aside class="iv-left" style="--tone:${TONE_COLOR[tone]};--phbg:${F.photo}">` +
+        `<div class="iv-frame" data-tone="${tone}"><div class="iv-badge">${U.esc(badge)}</div>` +
+        `<div class="iv-sil">${Silhouette.svg(sus, { s: s, fam: fam, mode: 'full', tone: tone, stance: stance, w: 176 })}</div></div>` +
+        `<div class="iv-meta"><h3>${U.esc(sus.name)}</h3><p class="sp-note">${U.esc(sus.role)} · ${U.esc(loc ? loc.name : s.world.city.name)}</p>` +
+        `<ol class="fc-beats">${beats.map((b) => `<li class="${b.done ? 'done' : ''}"><b>${b.n}. ${U.esc(b.title)}</b><small>${U.esc(b.sub)}</small></li>`).join('')}</ol></div>` +
+      `</aside>` +
+      `<section class="iv-right">` +
+        `<div class="iv-paper"><div class="iv-phead"><span>De Ontmaskering · ${U.esc(s.meta.title)}</span><span>Slag ${Math.min(fc.step + 1, 3)} van 3</span></div>` +
+        `<div class="iv-log">${logHtml}</div></div>` +
+        `<div class="iv-desk fc-desk">${actionHtml}</div>` +
+      `</section></div>`;
   }
 };
 
@@ -1945,7 +2021,7 @@ const Coach = {
       }
       if (inVisit && intro.step === 0) {
         return { id: 'att', guided: true, n: 1, sel: ['.sp-att'], title: 'De klok loopt',
-          text: 'Alles kost tijd. Aanspreken en onderzoeken ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + ', lopen naar een andere plek 15 tot 45. Binnen een gesprek zijn alle vragen gratis. Om twaalf en om vijf uur gaan de mensen naar hun volgende plek.', btn: 'Volgende' };
+          text: 'Rondkijken is gratis. Grondig onderzoeken en aanspreken kosten ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + ', lopen 15 tot 45. Binnen een gesprek zijn alle vragen gratis. Mensen komen en gaan door de dag op hun eigen ritme.', btn: 'Volgende' };
       }
       if (inVisit && intro.step === 1) {
         const anyone = Tableau.model(s, v.locId, s.clock.part).hs.some((x) => x.kind !== 'obj');

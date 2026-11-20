@@ -150,7 +150,7 @@ const SFX = {
   }
 };
 const UI = {
-  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', sbSel: [], sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
+  s: null, screen: null, intro: null, introT: null, level: 'normaal', tab: 'board', boardMode: 'board', threadKind: 'verband', threadLayer: 'over', sbSel: [], sel: null, link: null, stn: null, hot: null, approach: 'reserved', deltas: {}, showEv: false, zvSlot: 'suspectId', jTab: 'overzicht', jQuery: '', hintTier: 1, hintTurn: -1, lastFocus: null, peekFocus: null, typeTimer: null, feed: [], theme: 'auto', size: 'normal', font: 'classic', oldRaw: null, taps: 0, tt: null, bound: false,
   swStatus: 'idle', swReg: null, swWaiting: null, _swUserReload: false, _swRefreshing: false,
   _shell: null, _headHtml: null, _stageKey: null, _drawerHtml: null, _drawerId: null, _coachHtml: null, _boardLayout: null, _boardRO: null, _rafThreads: 0, _noteSaveT: null,
   btn: (label, data, cls) => '<button type="button" class="chip ' + (cls || '') + '" ' + Object.keys(data).map((k) => 'data-' + k + '="' + U.esc(data[k]) + '"').join(' ') + '>' + label + '</button>',
@@ -252,6 +252,7 @@ const UI = {
       size = ['normal', 'large', 'xlarge'].indexOf(parsed.size) >= 0 ? parsed.size : 'normal';
       font = ['classic', 'plain'].indexOf(parsed.font) >= 0 ? parsed.font : 'classic';
       SFX.muted = !!parsed.muted;
+      if (['over', 'under', 'off'].indexOf(parsed.threadLayer) >= 0) this.threadLayer = parsed.threadLayer;
       if (LEVELS[parsed.level]) this.level = parsed.level;
     } catch (e) { theme = 'auto'; size = 'normal'; font = 'classic'; parsed = {}; }
     this.setTheme(theme, true);
@@ -466,10 +467,10 @@ const UI = {
     if (this.tab === 'visit' && !s.visit) { this.tab = 'board'; this.hot = null; this.deltas = {}; this.showEv = false; }
     if (s.turn > 0 && s.turn % 40 === 0) this.toast('Tip: maak af en toe een export via Systeem.');
     this.render(true);
-    if (s.play.ended && !s.play.endingShown) { s.play.endingShown = true; Store.put('auto', Save.pack(s)); this.ending(); }
+    if (s.play.ended && !s.play.endingShown && !s.play.finalConfront) { s.play.endingShown = true; Store.put('auto', Save.pack(s)); this.ending(); }
   },
   map() { return Travel.map(this.s); },
-  savePrefs() { Store.put('prefs', JSON.stringify({ theme: this.theme, size: this.size, font: this.font, muted: SFX.muted, level: this.level, intro: this.intro })); },
+  savePrefs() { Store.put('prefs', JSON.stringify({ theme: this.theme, size: this.size, font: this.font, muted: SFX.muted, level: this.level, intro: this.intro, threadLayer: this.threadLayer })); },
   setTheme(t, quiet) { this.theme = t; document.documentElement.dataset.theme = t; if (!quiet) this.savePrefs(); },
   setSize(sz, quiet) { this.size = ['normal', 'large', 'xlarge'].indexOf(sz) >= 0 ? sz : 'normal'; document.documentElement.dataset.size = this.size; if (!quiet) this.savePrefs(); },
   setFont(fn, quiet) { this.font = ['classic', 'plain'].indexOf(fn) >= 0 ? fn : 'classic'; document.documentElement.dataset.font = this.font; if (!quiet) this.savePrefs(); },
@@ -610,31 +611,34 @@ const UI = {
     if (el && el.focus) el.focus({ preventScroll: true });
   },
   headHtml(s) {
-    const part = s.clock.part, v = s.visit, ended = !!s.play.ended, here = World.here(s);
+    const part = s.clock.part, v = s.visit, ended = !!s.play.ended, here = World.here(s), fc = s.play && s.play.finalConfront;
     const newBoard = Pins.newIds(s).length, newJournal = Pins.journalNew(s);
     const tabs = [['board', 'Zaakbord', newBoard], ['map', 'Kaart', 0]].concat(v ? [['visit', 'Bezoek: ' + here.name, 0]] : []);
-    const late = s.clock.day > DAY.soft;
+    const late = s.clock.day > DAY.soft, nowMin = Clock.norm(s);
     let actHtml = '';
-    if (!ended) {
+    if (!ended && !fc) {
       if (v) actHtml = `<button type="button" class="sp-hbtn go" data-ui="leave">Vertrek uit ${U.esc(here.name)}</button>`;
       else {
-        if (part < DAY.parts) actHtml += `<button type="button" class="sp-hbtn" data-ui="wait">Wacht tot ${part < 2 ? PARTS[part + 1] + ' (' + U.hm(Clock.partEnd(part)) + ')' : '22:00'}</button>`;
+        if (nowMin < NIGHT) {
+          const step = Math.min(60, NIGHT - nowMin);
+          actHtml += `<button type="button" class="sp-hbtn" data-ui="wait">Wacht ${step === 60 ? '1 uur' : step + ' min'} (${U.hm(nowMin + step)})</button>`;
+        }
         if (part >= 2) actHtml += `<button type="button" class="sp-hbtn${part >= DAY.parts ? ' go' : ''}" data-ui="endday">Sluit dag af</button>`;
       }
     }
-    const clockAria = `Dag ${s.clock.day} van ${DAY.soft}, ${U.hm(Clock.norm(s))}, ${PARTS[part]}${late ? '. Het spoor koelt af' : ''}. Tik voor uitleg over de tijd.`;
+    const clockAria = `Dag ${s.clock.day} van ${DAY.soft}, ${U.hm(nowMin)}${late ? '. Het spoor koelt af' : ''}. Tik voor uitleg over de tijd.`;
     const badge = (n) => n > 0 ? `<span class="nav-badge" aria-label="${n} nieuw">+${n}</span>` : '';
     return `<div class="sp-brand"><h1 class="sp-title" data-ui="title">Het Spoor</h1><span class="sp-case" title="${U.esc(s.meta.title + ' — ' + s.meta.eraLabel + ', ' + s.world.city.name)}">${U.esc(s.meta.title)} · ${U.esc(s.world.city.name)}</span></div>` +
       `<nav class="sp-tabs" aria-label="Hoofdnavigatie">` +
-      tabs.map((t) => `<button type="button" data-ui="tab" data-v="${t[0]}" class="${this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${this.tab === t[0] ? ' aria-current="page"' : ''}>${U.esc(t[1])}${badge(t[2])}</button>`).join('') +
+      tabs.map((t) => `<button type="button" data-ui="tab" data-v="${t[0]}" class="${!fc && this.tab === t[0] ? 'on' : ''}${t[0] === 'visit' ? ' visit' : ''}"${!fc && this.tab === t[0] ? ' aria-current="page"' : ''}${fc ? ' disabled' : ''}>${U.esc(t[1])}${badge(t[2])}</button>`).join('') +
       `</nav>` +
       `<div class="sp-status">` +
-        `<button type="button" class="sp-clock${part >= DAY.parts ? ' night' : ''}${late ? ' late' : ''}" data-ui="budgethelp" aria-label="${U.esc(clockAria)}">Dag ${s.clock.day} · <b>${U.hm(Clock.norm(s))}</b> · ${PARTS[part]} <span class="sp-help" aria-hidden="true">?</span></button>` +
+        `<button type="button" class="sp-clock${part >= DAY.parts ? ' night' : ''}${late ? ' late' : ''}" data-ui="budgethelp" aria-label="${U.esc(clockAria)}">Dag ${s.clock.day} · <b>${U.hm(nowMin)}</b> <span class="sp-help" aria-hidden="true">?</span></button>` +
         actHtml +
       `</div>` +
       `<div class="sp-tools">` +
-        `<button type="button" data-ui="journal">Dagboek${badge(newJournal)}</button>` +
-        `<button type="button" data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}>Zaakverslag</button>` +
+        `<button type="button" data-ui="journal"${fc ? ' disabled' : ''}>Dagboek${badge(newJournal)}</button>` +
+        `<button type="button" data-ui="dossier"${this.dossierReady() ? ' class="hot"' : ''}${fc ? ' disabled' : ''}>Zaakverslag</button>` +
         `<button type="button" data-ui="system">Systeem</button>` +
         `<button type="button" class="sp-icon-btn" data-ui="mute" aria-pressed="${!SFX.muted}" aria-label="${SFX.muted ? 'Geluid aanzetten' : 'Geluid uitzetten'}" title="${SFX.muted ? 'Geluid staat uit' : 'Geluid staat aan'}">${SFX.muted ? '🔇' : '🔊'}</button>` +
       `</div>`;
@@ -644,7 +648,7 @@ const UI = {
     this._boardLayout = L;
     const p = s.player || {};
     return [
-      'board', this.boardMode, fam, Level.id(s), this.link || '', this.threadKind,
+      'board', this.boardMode, fam, Level.id(s), this.link || '', this.threadKind, this.threadLayer,
       L.cards.map((c) => c.id + ':' + c.kind + ':' + (Pins.mark(s, c.id) || '')).join(','),
       Board.folders(s).map((f) => f.zone + ':' + f.n).join(','),
       L.threads.map((t) => t.a + '-' + t.b + '-' + t.kind + '-' + (t.meaning || '')).join(','),
@@ -652,6 +656,7 @@ const UI = {
       JSON.stringify(s.play.cleared || {}),
       JSON.stringify(s.play.debunked || {}),
       JSON.stringify(s.play.resolved || {}),
+      JSON.stringify(s.play.pressure || {}),
       this.boardMode === 'matrix' || this.boardMode === 'timeline' ? JSON.stringify(s.play.asked || {}) + JSON.stringify(s.play.alibiCheck || {}) : '',
       this.boardMode === 'timeline' ? Object.keys(s.play.found || {}).join(',') + '|' + (this.sbSel || []).join(',') : ''
     ].join('|');
@@ -665,13 +670,15 @@ const UI = {
   },
   renderDrawer(s, fam, sh) {
     let html = '', isFeed = false, dId = null;
-    if (this.tab === 'board') {
-      if (this.link) { html = Board.linkPanel(s, this.link, this.threadKind); dId = 'link:' + this.link; }
-      else if (this.sel) { html = Board.detail(s, this.sel, fam); dId = 'card:' + this.sel; }
-      else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
-    } else if (this.tab === 'map') {
-      if (this.stn) { html = this.stnDetail(s, this.stn); dId = 'stn:' + this.stn; }
-      else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
+    if (!(s.play && s.play.finalConfront)) {
+      if (this.tab === 'board') {
+        if (this.link) { html = Board.linkPanel(s, this.link, this.threadKind); dId = 'link:' + this.link; }
+        else if (this.sel) { html = Board.detail(s, this.sel, fam); dId = 'card:' + this.sel; }
+        else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
+      } else if (this.tab === 'map') {
+        if (this.stn) { html = this.stnDetail(s, this.stn); dId = 'stn:' + this.stn; }
+        else if (this.feed.length) { html = `<button type="button" class="sp-x" data-ui="feedx">Sluiten</button><h3>Zojuist</h3>${this.feedLines()}`; isFeed = true; dId = 'feed'; }
+      }
     }
     const hadDrawer = !sh.drawer.hidden;
     sh.drawer.classList.toggle('sp-feed', isFeed);
@@ -688,11 +695,23 @@ const UI = {
     if (hadDrawer !== !!html && this.tab === 'board' && this.boardMode === 'board') this.scheduleThreads();
   },
   renderStage(s, fam, sh) {
+    // v0.19.0 (Fase I): live 3-beat Final Confrontation ("De Ontmaskering") takes over the main stage
+    if (s.play && s.play.finalConfront && typeof FinalConfrontView !== 'undefined') {
+      this.stopBoardObserver();
+      const fc = s.play.finalConfront;
+      const fcKey = 'fc:' + fc.suspectId + ':' + fc.step + ':' + (fc.outcome || '') + ':' + fc.log.length + ':' + fam;
+      if (this._stageKey === fcKey && sh.stage.querySelector('.fc-view')) return;
+      sh.stage.innerHTML = FinalConfrontView.html(s, fam);
+      const log = sh.stage.querySelector('.iv-log'); if (log) log.scrollTop = log.scrollHeight;
+      this._stageKey = fcKey;
+      return;
+    }
+
     if (this.tab === 'visit' && s.visit) {
       this.stopBoardObserver();
       const v = s.visit;
       if (v.conv && typeof Interrogation !== 'undefined') {
-        const ivKey = 'iv:' + v.conv + ':' + Rels.toneOf(s, v.conv) + ':' + s.play.logN + ':' + (this.showEv ? '1' : '0') + ':' + JSON.stringify(this.deltas || {}) + ':' +
+        const ivKey = 'iv:' + v.conv + ':' + Rels.toneOf(s, v.conv) + ':' + Living.pressure(s, v.conv) + ':' + s.play.logN + ':' + (this.showEv ? '1' : '0') + ':' + JSON.stringify(this.deltas || {}) + ':' +
           Object.keys(s.play.found).length + ':' + Object.keys(s.play.resolved).length + ':' + (v.used[v.conv] || []).length + ':' + s.player.money + ':' + fam;
         if (this._stageKey === ivKey && sh.stage.querySelector('.iv')) {
           this.patchIvApproach(sh);
@@ -720,8 +739,8 @@ const UI = {
 
     if (this.tab === 'map') {
       this.stopBoardObserver();
-      const mapKey = 'map:' + s.seed + ':' + s.clock.part + ':' + s.pos + ':' + Object.keys(s.play.met).length + ':' +
-        Object.keys(s.play.metCrowd || {}).length + ':' + Object.keys(s.play.visited).length + ':' + Object.keys(s.play.heardOfLoc || {}).length + ':' + fam;
+      const mapKey = 'map:' + s.seed + ':' + s.clock.day + ':' + Clock.norm(s) + ':' + s.pos + ':' + Object.keys(s.play.met).length + ':' +
+        Object.keys(s.play.metCrowd || {}).length + ':' + Object.keys(s.play.visited).length + ':' + Object.keys(s.play.heardOfLoc || {}).length + ':' + JSON.stringify(s.play.divert || {}) + ':' + fam;
       if (this._stageKey === mapKey && sh.stage.querySelector('.mv svg')) {
         this.patchMapSelection(sh);
         return;
@@ -739,7 +758,7 @@ const UI = {
     }
     const prevBw = sh.stage.querySelector('.bw'), bwTop = prevBw ? prevBw.scrollTop : 0, bwLeft = prevBw ? prevBw.scrollLeft : 0;
     const prevSb = sh.stage.querySelector('.sb-scroll'), sbLeft = prevSb ? prevSb.scrollLeft : 0;
-    const res = Board.html(s, fam, this.sel, this.link, { mode: this.boardMode, threadKind: this.threadKind, sbSel: this.sbSel, map: this.map() });
+    const res = Board.html(s, fam, this.sel, this.link, { mode: this.boardMode, threadKind: this.threadKind, threadLayer: this.threadLayer, sbSel: this.sbSel, map: this.map() });
     this._boardLayout = res.L;
     sh.stage.innerHTML = `<div class="bw">${res.html}</div>`;
     const nextBw = sh.stage.querySelector('.bw');
@@ -853,6 +872,7 @@ const UI = {
   drawThreads() {
     const s = this.s; if (!s || this.screen || this.tab !== 'board' || this.boardMode !== 'board') return;
     const bd = $('#app .bd'), svg = bd && bd.querySelector('svg.bt'); if (!bd || !svg) return;
+    if (this.threadLayer === 'off') { svg.innerHTML = ''; return; }
     const br = bd.getBoundingClientRect ? bd.getBoundingClientRect() : null;
     if (!br || !br.width || !br.height) return;
     const W = Math.max(1, Math.round(bd.scrollWidth || br.width)), H = Math.max(1, Math.round(bd.scrollHeight || br.height));
@@ -865,29 +885,34 @@ const UI = {
     const link = this.link && byId[this.link] ? this.link : null;
     const sel = link || (this.sel && byId[this.sel] ? this.sel : null);
     const hl = link ? new Set([link].concat(Pins.ends(s, link))) : sel ? Board.linked(s, L, sel) : null;
-    let paths = '', dots = '';
+    const usePin = this.threadLayer !== 'under';
+    const pt = (idA, idB) => usePin ? Board.anchorPin(rects[idA], idA) : Board.anchorRect(rects[idA], rects[idB]);
+    let halos = '', paths = '', dots = '';
     if (hl && sel && !link && rects[sel]) {
       const e = Evidence.get(s, sel.slice(2));
       if (e) e.requires.forEach((r) => {
         const tid = rects['d:' + r] ? 'd:' + r : rects['s:' + r] ? 's:' + r : null;
-        if (tid) paths += `<path class="req hl" d="${Board.path(Board.anchorRect(rects[sel], rects[tid]), Board.anchorRect(rects[tid], rects[sel]), 'req')}"/>`;
+        if (tid) paths += `<path class="req hl" d="${Board.path(pt(sel, tid), pt(tid, sel), 'req')}"/>`;
       });
     }
     L.threads.forEach((t) => {
       const ra = rects[t.a], rb = rects[t.b]; if (!ra || !rb) return;
-      const p1 = Board.anchorRect(ra, rb), p2 = Board.anchorRect(rb, ra);
+      const p1 = pt(t.a, t.b), p2 = pt(t.b, t.a);
       const on = !!(hl && hl.has(t.a) && hl.has(t.b));
       const mCls = t.kind === 'mine' ? ' m-' + (t.meaning || 'verband') : '';
-      paths += `<path class="${t.kind}${mCls}${on ? ' hl' : ''}" d="${Board.path(p1, p2, t.kind)}"/>`;
+      const dStr = Board.path(p1, p2, t.kind);
+      if (usePin) halos += `<path class="th-halo${on ? ' hl' : ''}" d="${dStr}"/>`;
+      paths += `<path class="${t.kind}${mCls}${on ? ' hl' : ''}" d="${dStr}"/>`;
       if (t.kind !== 'said') {
         const dCls = 'pt-' + (t.kind === 'mine' ? (t.meaning || 'verband') : t.kind) + (on ? ' hl' : '');
-        dots += `<circle class="${dCls}" cx="${p1[0].toFixed(1)}" cy="${p1[1].toFixed(1)}" r="4"/><circle class="${dCls}" cx="${p2[0].toFixed(1)}" cy="${p2[1].toFixed(1)}" r="4"/>`;
+        const rDot = usePin ? (on ? '5.2' : '4.2') : '4';
+        dots += `<circle class="${dCls}" cx="${p1[0].toFixed(1)}" cy="${p1[1].toFixed(1)}" r="${rDot}"/><circle class="${dCls}" cx="${p2[0].toFixed(1)}" cy="${p2[1].toFixed(1)}" r="${rDot}"/>`;
       }
     });
     svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
     svg.setAttribute('width', String(W));
     svg.setAttribute('height', String(H));
-    svg.innerHTML = paths + dots;
+    svg.innerHTML = halos + paths + dots;
   },
   render(keepFocus) {
     if (this.screen) return this.renderScreen();
@@ -904,11 +929,10 @@ const UI = {
     this.renderCoach(sh);
     if (focusSel) this.restoreFocus(focusSel);
   },
-  // v0.6.5 (voorstel 11): a tap on the map selects a place first; this drawer replaces the hover tooltips and
-  // prevents a mis-tap from opening a visit (which costs a part of the day)
+  // v0.6.5 / v0.19.0: station detail drawer using true opening hours and continuous Schedule.atMin
   stnDetail(s, id) {
     const l = World.loc(s, id); if (!l) return '';
-    const part = s.clock.part, night = part >= DAY.parts, open = World.openAt(l, part), v = s.visit;
+    const nowMin = Clock.norm(s), night = nowMin >= NIGHT, open = World.openAtMin(l, nowMin), v = s.visit;
     const allDay = l.open[0] === 0 && l.open[1] === 24;
     const tags = [];
     if (l.id === s.startLoc) tags.push('Hier logeer je.');
@@ -917,13 +941,13 @@ const UI = {
     if (l.id === s.crime.crimeLocationId) tags.push('Plaats van het voorval.');
     if (l.id === s.crime.victimLocationId) tags.push('Werk of woning van ' + s.crime.victim.name + '.');
     if (v && v.locId === l.id) tags.push('Hier ben je nu.');
-    const present = open && !night ? s.cast.concat(s.crowd).filter((n) => Schedule.at(s, n.id, s.clock.day, part) === l.id) : [];
+    const present = open && !night ? s.cast.concat(s.crowd).filter((n) => Schedule.atMin(s, n.id, s.clock.day, nowMin) === l.id) : [];
     const known = present.filter((n) => People.known(s, n.id)).sort(byName), unk = present.length - known.length;
     let h = `<button type="button" class="sp-x" data-ui="stnx">Sluiten</button><h3>${U.esc(l.name)}</h3><p class="sp-note">${U.esc(l.description)}</p>`;
     if (tags.length) h += `<p>${tags.map(U.esc).join(' ')}</p>`;
-    h += `<h4>Openingstijden</h4><p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + l.open[0] + ' tot ' + l.open[1] + ' uur.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open, in de ' + PARTS[part] + '.' : 'Nu dicht, in de ' + PARTS[part] + '.'}</p>`;
+    h += `<h4>Openingstijden</h4><p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + String(l.open[0]).padStart(2, '0') + ':00 tot ' + String(Math.min(24, l.open[1])).padStart(2, '0') + ':00.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open (' + U.hm(nowMin) + ').' : 'Nu gesloten (' + U.hm(nowMin) + ').'}</p>`;
     if (open && !night) {
-      h += `<h4>Aanwezig in de ${PARTS[part]}</h4>`;
+      h += `<h4>Nu aanwezig (${U.hm(nowMin)})</h4>`;
       h += known.length ? `<ul>${known.map((n) => `<li>${U.esc(n.name)}, ${U.esc(String(n.role).replace(/ \(.*\)$/, ''))}${People.isCore(s, n.id) ? '' : ' (bijfiguur)'}</li>`).join('')}</ul>` : '';
       h += unk > 0 ? `<p class="sp-note">${unk === 1 ? 'Eén persoon' : unk + ' mensen'} die je nog niet gesproken hebt.</p>` : (known.length ? '' : '<p class="sp-note">Niemand aanwezig.</p>');
     }
@@ -932,7 +956,7 @@ const UI = {
     else if (night) h += `<p class="sp-note">Sluit de dag af om morgen verder te gaan.</p>`;
     else { const T = Travel.check(s, l.id);
       if (T.late) h += `<button type="button" class="sp-btn wide" disabled>Te laat: je bent er pas om ${U.hm(T.at)}</button>`;
-      else if (!T.open) h += `<button type="button" class="sp-btn wide" disabled>Dicht als je aankomt (${U.hm(T.at)}, ${PARTS[T.part]})</button>`;
+      else if (!T.open) h += `<button type="button" class="sp-btn wide" disabled>Gesloten bij aankomst (${U.hm(T.at)})</button>`;
       else if (T.here) h += `<button type="button" class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar binnen in ${U.esc(l.name)}</button>`;
       else h += `<button type="button" class="sp-btn go wide" data-ui="visit" data-v="${l.id}">Ga naar ${U.esc(l.name)} (${T.walk} min lopen, aankomst ${U.hm(T.at)})</button>`; }
     return h;
@@ -959,21 +983,22 @@ const UI = {
       if (!known) {
         inner += `<b>${U.esc(label)}</b><p class="sp-note">Je weet nog niet wie dit is.</p>` + (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('greet') ? `<button type="button" class="sp-act live" data-ui="greet" data-v="${x.id}">Aanspreken${mins('greet')}</button>` : outBtn);
       } else if (core) {
-        const tone = Rels.toneOf(s, x.id);
-        inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}</span></div></div>` +
+        const tone = Rels.toneOf(s, x.id), pLbl = Living.pressureLabel(s, x.id);
+        inner += `<div class="row2"><div style="border:2px solid ${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(x, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 48 })}</div><div><b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role.replace(/ \(.*\)$/, ''))} · ${TONE_WORD[tone]}${pLbl ? ' · ' + U.esc(pLbl) : ''}</span></div></div>` +
           (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('talk') ? `<button type="button" class="sp-act live" data-ui="talk" data-v="${x.id}">Verhoren${mins('talk')}</button>` : outBtn);
       } else {
         inner += `<b>${U.esc(x.name)}</b><br><span class="sp-note">${U.esc(x.role)}, niet betrokken bij de zaak</span>` +
           (v.done[x.id] ? `<button type="button" class="sp-act" disabled>Al gesproken tijdens dit bezoek</button>` : can('mingle') ? `<button type="button" class="sp-act live" data-ui="mingle" data-v="${x.id}">Even praten${mins('mingle')}</button>` : outBtn);
       }
     } else {
+      // v0.19.0 (Fase I): free first impression before spending time to search, plus watcher warning against blind clicking
+      const loc = World.here(s), glance = World.glanceOf(s, loc, sel.ref);
       const clue = s.evidence.find((e) => e.source.objectId === sel.ref.id && s.play.found[e.id]);
       const early = !clue && s.play.early && s.play.early[sel.ref.id], seen = !clue && !early && s.play.examined && s.play.examined[sel.ref.id];
       inner += `<b>${U.esc(Rnd.cap(sel.ref.name))}</b>` +
-        (clue ? `<p class="sp-note">Gevonden: <b>${U.esc(clue.title)}</b></p>`
-          : early ? `<p class="sp-note"><b>Opvallend (?)</b>: Kom hier later terug zodra je meer weet.</p>`
-          : seen ? `<p class="sp-note">Hier heb je al gekeken.</p>` : `<p class="sp-note">Van dichtbij bekijken</p>`) +
-        (clue || seen ? '' : can('examine') ? `<button type="button" class="sp-act live" data-ui="examine" data-v="${sel.ref.id}">${early ? 'Opnieuw onderzoeken' : 'Onderzoeken'}${mins('examine')}</button>` : outBtn);
+        `<p class="sp-note">${U.esc(glance.text)}</p>` +
+        (!clue && !seen && glance.watcher ? `<p class="sp-watch-warn">Let op: ${U.esc(U.first(glance.watcher))} kijkt toe in eigen ruimte.</p>` : '') +
+        (clue || seen ? '' : can('examine') ? `<button type="button" class="sp-act live" data-ui="examine" data-v="${sel.ref.id}">${early ? 'Opnieuw grondig onderzoeken' : 'Grondig onderzoeken'}${mins('examine')}</button>` : outBtn);
     }
     return `<div class="tv-pop" style="left:${px}%;top:${py}%">${inner}</div>`;
   },
@@ -988,11 +1013,11 @@ const UI = {
     }
     const loc = World.here(s), part = s.clock.part, M = Tableau.model(s, loc.id, part);
     const pop = this.tableauPop(s, fam, M);
-    // v0.12.0: the clock of this part of the day; at its end people move on
-    const now = Clock.norm(s), p0 = PART_START[part], p1 = Clock.partEnd(part), pct = Math.round(100 * (now - p0) / (p1 - p0));
+    // v0.19.0: continuous day clock (08:00 - 22:00) with true location closing time instead of rigid 3-part jumps
+    const now = Clock.norm(s), closeM = World.closeMin(loc), pct = Math.max(0, Math.min(100, Math.round(100 * (now - PART_START[0]) / (NIGHT - PART_START[0]))));
     let side = `<h3>${U.esc(loc.name)}</h3><p class="sp-note">${U.esc(loc.description)}</p>` +
-      `<div class="sp-att sp-time"><span>${U.hm(now)}</span><span class="tbar" role="progressbar" aria-label="Voortgang ${PARTS[part]} tot ${U.hm(p1)}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span><b>tot ${U.hm(p1)}</b></div>` +
-      `<p class="sp-note">Aanspreken en onderzoeken kost ${Level.cost(s, 'examine')} minuten, verhoren ${Level.cost(s, 'talk')}. Binnen een gesprek zijn alle vragen gratis. Om ${U.hm(p1)} ${part < 2 ? 'gaan de mensen naar hun volgende plek' : 'is de dag voorbij'}.</p>`;
+      `<div class="sp-att sp-time"><span>${U.hm(now)}</span><span class="tbar" role="progressbar" aria-label="Dagverloop tot sluiting om ${U.hm(closeM)}" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></span><b>open tot ${U.hm(closeM)}</b></div>` +
+      `<p class="sp-note">Rondkijken is gratis. Grondig onderzoeken of aanspreken kost ${Level.cost(s, 'examine')} min, verhoren ${Level.cost(s, 'talk')} min. Mensen komen en gaan door de dag op hun eigen ritme.</p>`;
     const intro = loc.name + '. ' + loc.description, feedAll = this.feed;
     this.feed = feedAll.filter((m) => m.text !== intro);   // the description already stands above (v0.6.5)
     side += this.feedHtml('tv-msg'); this.feed = feedAll;
@@ -1001,8 +1026,8 @@ const UI = {
     const seen = (x) => x.kind === 'obj' && !hasClue(x) && !isEarly(x) && s.play.examined && s.play.examined[x.ref.id];
     const chip = (x) => `<button type="button" class="sp-chip${this.hot === x.id ? ' on' : ''}${hasClue(x) || seen(x) || (x.kind !== 'obj' && v.done[x.ref.id]) ? ' done' : ''}${isEarly(x) ? ' early' : ''}" data-hs="${x.id}">${U.esc(Tableau.label(x, s, M))}</button>`;
     const ppl = M.hs.filter((x) => x.kind !== 'obj'), objs = M.hs.filter((x) => x.kind === 'obj');
-    side += `<h4>Aanwezig in ${U.esc(loc.name)}</h4>${ppl.length ? `<div class="sp-chips">${ppl.map(chip).join('')}</div>` : '<p class="sp-note">Niemand aanwezig.</p>'}` +
-      `<h4>Voorwerpen</h4><div class="sp-chips">${objs.map(chip).join('')}</div>`;
+    side += `<h4>Nu aanwezig in ${U.esc(loc.name)}</h4>${ppl.length ? `<div class="sp-chips">${ppl.map(chip).join('')}</div>` : '<p class="sp-note">Niemand aanwezig.</p>'}` +
+      `<h4>Voorwerpen (tik voor eerste indruk)</h4><div class="sp-chips">${objs.map(chip).join('')}</div>`;
     return `<div class="tv"><div class="tv-stage"><div class="tv-canvas">${Tableau.svg(s, loc.id, part, fam, this.hot)}${pop}</div></div><aside class="tv-side">${side}</aside></div>`;
   },
   startVisit(locId) {
@@ -1011,7 +1036,7 @@ const UI = {
     if (s.clock.part >= DAY.parts) return this.toast('Het is nacht. Sluit de dag af om morgen verder te gaan.');
     const T = Travel.check(s, locId);
     if (T.late) return this.toast('Je komt pas om ' + U.hm(T.at) + ' aan in ' + loc.name + '. Dat is te laat voor vandaag.');
-    if (!T.open) return this.toast(loc.name + ' is dicht in de ' + PARTS[T.part] + (T.part !== s.clock.part ? ', als je er om ' + U.hm(T.at) + ' aankomt' : '') + '.');
+    if (!T.open) return this.toast(loc.name + ' is dicht om ' + U.hm(T.at) + ' (open van ' + String(loc.open[0]).padStart(2, '0') + ':00 tot ' + String(Math.min(24, loc.open[1])).padStart(2, '0') + ':00).');
     if (this.tab === 'board' && Act.see(s)) Store.put('auto', Save.pack(s));
     if (T.walk > 0) SFX.steps(); else SFX.paper();
     this.sel = null; this.stn = null; this.hot = null; this.deltas = {}; this.showEv = false; this.tab = 'visit';
@@ -1075,6 +1100,13 @@ const UI = {
         SFX.pin();
         if (Pins.THREAD_KINDS[d.v]) this.threadKind = d.v;
         return this.render(true);
+      case 'thlayer': {
+        SFX.pin();
+        const order = ['over', 'under', 'off'];
+        this.threadLayer = order[(order.indexOf(this.threadLayer) + 1) % order.length];
+        this.savePrefs();
+        return this.render(true);
+      }
       case 'seen-all':
         SFX.pin();
         if (Act.see(s)) Store.put('auto', Save.pack(s));
@@ -1098,7 +1130,7 @@ const UI = {
       case 'unthread': SFX.pin(); if (Act.thread(s, d.a, d.b)) Store.put('auto', Save.pack(s)); return this.render(true);
       case 'arch': { const z = Pins.zone(d.v); if (!Act.archive(s, d.v, true)) return; SFX.folder(); this.sel = null; Store.put('auto', Save.pack(s)); this.toast('In ' + Pins.FOLDER[z] + ' gelegd. Via het mapje haal je de kaart terug.'); return this.render(); }
       case 'archive': SFX.folder(); return this.archiveBox(d.v);
-      case 'budgethelp': return this.toast('Je hebt vier dagen, elk van acht uur \'s ochtends tot tien uur \'s avonds. Lopen kost 15 tot 45 minuten, aanspreken en onderzoeken ' + Level.cost(s, 'examine') + ' minuten, verhoren ' + Level.cost(s, 'talk') + '. Om twaalf en om vijf uur gaan de mensen naar hun volgende plek. Na dag ' + DAY.soft + ' koelt het spoor af en wordt je eindverslag minder sterk.', 7000);
+      case 'budgethelp': return this.toast('Je hebt vier dagen, elke dag van 08:00 tot 22:00. Rondkijken is gratis. Lopen kost 15 tot 45 min, aanspreken en grondig onderzoeken ' + Level.cost(s, 'examine') + ' min, verhoren ' + Level.cost(s, 'talk') + ' min. Mensen komen en gaan door de dag op hun eigen ritme. Na dag ' + DAY.soft + ' koelt het spoor af.', 7500);
       case 'mute': return this.toggleMute();
       case 'hotx': this.hot = null; return this.render(true);
       case 'journal': SFX.folder(); return this.journal();
@@ -1115,22 +1147,9 @@ const UI = {
       }
       case 'wait': {
         if (s.visit || s.clock.part >= DAY.parts || s.play.ended) return;
-        const endAt = Clock.partEnd(s.clock.part), skipMin = endAt - Clock.norm(s);
-        const doWait = () => {
-          const r = this.run((st) => Act.wait(st));
-          if (s.clock.part >= 2) SFX.bell(harbor); else SFX.paper();
-          return r;
-        };
-        if (skipMin > 60) {
-          const untilTxt = s.clock.part < 2 ? 'de ' + PARTS[s.clock.part + 1] + ' (' + U.hm(endAt) + ')' : '22:00 (einde van de dag)';
-          return this.confirm({
-            title: 'Tijd overslaan?',
-            body: '<p>Je slaat <b>' + skipMin + ' minuten</b> over tot ' + U.esc(untilTxt) + '.</p><p class="sys">Om ' + U.hm(endAt) + ' ' + (s.clock.part < 2 ? 'gaan de mensen naar hun volgende plek' : 'sluit de stad voor de nacht') + '.</p>',
-            okLabel: 'Ja, wacht tot ' + U.hm(endAt),
-            onOk: doWait
-          });
-        }
-        return doWait();
+        const r = this.run((st) => Act.wait(st, 60));
+        if (s.clock.part >= 2) SFX.bell(harbor); else SFX.paper();
+        return r;
       }
       case 'endday': {
         if (s.visit || s.clock.part < 2 || s.play.ended) return;
@@ -1178,6 +1197,35 @@ const UI = {
         }
         SFX.miss();
         return this.runConv((st) => Act.confrontWrong(st, d.v));
+      }
+      case 'fc-step': {
+        const r = this.run((st) => Act.stepFinalConfront(st));
+        const fc = s.play.finalConfront;
+        if (fc && !fc.outcome) SFX.aha('clue');
+        const logBox = $('#app .fc-view .iv-log');
+        if (logBox) logBox.scrollTop = logBox.scrollHeight;
+        return r;
+      }
+      case 'fc-end': {
+        SFX.paper();
+        Act.finishFinalConfront(s);
+        s.play.endingShown = true;
+        Store.put('auto', Save.pack(s));
+        this.render(true);
+        return this.ending();
+      }
+      case 'fc-revise': {
+        SFX.folder();
+        Act.finishFinalConfront(s);
+        Store.put('auto', Save.pack(s));
+        this.render(true);
+        return this.dossier();
+      }
+      case 'fc-back': {
+        SFX.paper();
+        Act.finishFinalConfront(s);
+        Store.put('auto', Save.pack(s));
+        return this.render(true);
       }
     }
   },
@@ -1293,11 +1341,12 @@ const UI = {
     if (k === 'p') {
       const n = World.npc(s, id); if (!n) return;
       title = n.name;
+      const nowMin = Clock.norm(s), night = nowMin >= NIGHT;
       if (s.play.met[id]) {
-        const tone = Rels.toneOf(s, id), lv = Level.get(s);
+        const tone = Rels.toneOf(s, id), lv = Level.get(s), pLbl = Living.pressureLabel(s, id);
         const mk = Pins.mark(s, ref), note = Pins.note(s, ref);
         h += `<div class="p-headrow"><div class="p-port" style="border-color:${TONE_COLOR[tone]};background:${FAMILY[fam].photo}">${Silhouette.svg(n, { s: s, fam: fam, tone: tone, stance: TONE_STANCE[tone], w: 64 })}</div>` +
-          `<div><p class="p-role">${U.esc(n.role)}, ${n.age} jaar</p><p class="sp-note">Doet ${TONE_WORD[tone]} tegen je · houding: ${STANCE_LABEL[TONE_STANCE[tone]]}</p>` +
+          `<div><p class="p-role">${U.esc(n.role)}, ${n.age} jaar</p><p class="sp-note">Doet ${TONE_WORD[tone]} tegen je · houding: ${STANCE_LABEL[TONE_STANCE[tone]]}${pLbl ? ' · ' + U.esc(pLbl) : ''}</p>` +
           (n.kenmerk ? `<p class="p-km"><b>Kenmerk:</b> ${U.esc(KENMERK[n.kenmerk].desc)}.</p>` : '') + `</div></div>`;
         const al = s.alibis && s.alibis[id], chk = s.play.alibiCheck && s.play.alibiCheck[id];
         if (al && s.play.asked[id + ':alibi']) {
@@ -1311,8 +1360,8 @@ const UI = {
         if (mk || note) {
           h += `<p class="p-my">` + (mk ? `<span class="bc-mark m-${mk}">${Pins.MARKS[mk].icon} ${U.esc(Pins.MARKS[mk].label)}</span> ` : '') + (note ? `<span>${U.esc(note)}</span>` : '') + `</p>`;
         }
-        const nowLoc = s.clock.part < DAY.parts ? World.loc(s, Schedule.at(s, id, s.clock.day, s.clock.part)) : null;
-        if (nowLoc) h += `<p class="sp-note">Nu (${PARTS[s.clock.part]}): ${link(nowLoc.name)}.</p>`;
+        const nowLoc = !night ? World.loc(s, Schedule.atMin(s, id, s.clock.day, nowMin)) : null;
+        if (nowLoc) h += `<p class="sp-note">Nu (${U.hm(nowMin)}): ${link(nowLoc.name)}.</p>`;
         acts.push(`<button type="button" class="chip" data-peek-act="board" data-v="${U.esc(ref)}">Toon op zaakbord</button>`);
         if (nowLoc) acts.push(`<button type="button" class="chip" data-peek-act="map" data-v="${U.esc(nowLoc.id)}">Toon op kaart</button>`);
       } else {
@@ -1326,14 +1375,14 @@ const UI = {
     } else if (k === 'l') {
       const l = World.loc(s, id); if (!l) return;
       title = l.name;
-      const part = s.clock.part, night = part >= DAY.parts, open = World.openAt(l, part), T = Travel.check(s, id);
+      const nowMin = Clock.norm(s), night = nowMin >= NIGHT, open = World.openAtMin(l, nowMin), T = Travel.check(s, id);
       const allDay = l.open[0] === 0 && l.open[1] === 24;
-      h += `<p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + l.open[0] + ' tot ' + l.open[1] + ' uur.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open (' + PARTS[part] + ').' : 'Nu dicht (' + PARTS[part] + ').'}</p>`;
+      h += `<p class="sp-note">${allDay ? 'Altijd open.' : 'Open van ' + String(l.open[0]).padStart(2, '0') + ':00 tot ' + String(Math.min(24, l.open[1])).padStart(2, '0') + ':00.'} ${night ? 'Het is nu nacht.' : open ? 'Nu open (' + U.hm(nowMin) + ').' : 'Nu gesloten (' + U.hm(nowMin) + ').'}</p>`;
       if (s.play.visited[id]) {
         h += `<p>${U.esc(l.description)}</p>`;
         if (open && !night) {
-          const known = s.cast.filter((n) => s.play.met[n.id] && Schedule.at(s, n.id, s.clock.day, part) === id).sort(byName);
-          if (known.length) h += `<h4>Bekende aanwezigen (${PARTS[part]})</h4><p>${known.map((n) => `<button type="button" class="mention m-p" data-mention="p:${U.esc(n.id)}">${U.esc(n.name)}</button>`).join(', ')}</p>`;
+          const known = s.cast.filter((n) => s.play.met[n.id] && Schedule.atMin(s, n.id, s.clock.day, nowMin) === id).sort(byName);
+          if (known.length) h += `<h4>Bekende aanwezigen (${U.hm(nowMin)})</h4><p>${known.map((n) => `<button type="button" class="mention m-p" data-mention="p:${U.esc(n.id)}">${U.esc(n.name)}</button>`).join(', ')}</p>`;
         }
       } else {
         h += `<p class="sp-note">Je bent hier nog niet geweest.${!T.here ? ' Lopen kost ' + T.walk + ' minuten.' : ''}</p>`;
@@ -1554,6 +1603,7 @@ const UI = {
     const styleId = (s.meta && s.meta.dna && s.meta.dna.styles) || 'gezelschap';
     const sr = STYLE_REPORT[styleId] || STYLE_REPORT.gezelschap;
     const crimeloc = World.loc(s, s.crime.crimeLocationId);
+    const easy = Level.id(s) === 'makkelijk';
 
     // Ensure active slot defaults to the first unfilled blank
     if (!this.zvSlot || (d[this.zvSlot] && (!d.suspectId || !d.motiveEvidenceId || !d.methodEvidenceId))) {
@@ -1571,30 +1621,37 @@ const UI = {
       return `<button type="button" class="zv-blank${on}${filled}" data-zslot="${slot}">${U.esc(val || placeholder)}</button>`;
     };
 
-    const suspects = s.cast.filter((n) => s.play.met[n.id]).slice().sort(byName).map((n) => ({
-      id: n.id,
-      title: n.name,
-      sub: n.role.replace(/ \(.*\)$/, '') + (n.kenmerk ? ' · ' + KENMERK[n.kenmerk].label : '') + (s.play.cleared[n.id] && Level.get(s).checkLabel ? ' · alibi bevestigd' : '') +
-        (() => { const k = Pins.ends(s, 'p:' + n.id).length; return k ? ' · ' + k + (k === 1 ? ' draadje' : ' draadjes') : ''; })(),
-      warn: !!s.play.cleared[n.id] && Level.get(s).dim
-    }));
-    const motives = f.filter((e) => e.slot === 'motive').map((e) => ({
-      id: e.id,
-      title: e.title,
-      sub: (e.item ? Rnd.cap(e.item) : 'Verklaring') + (s.play.debunked[e.id] ? ' · weerlegd' : ''),
-      warn: !!s.play.debunked[e.id]
-    }));
-    const methods = f.filter((e) => e.slot === 'method').map((e) => ({
-      id: e.id,
-      title: e.title,
-      sub: (e.item ? Rnd.cap(e.item) : 'Doorgeprikt alibi') + (s.play.debunked[e.id] ? ' · weerlegd' : ''),
-      warn: !!s.play.debunked[e.id]
-    }));
+    const suspects = s.cast.filter((n) => s.play.met[n.id]).slice().sort(byName).map((n) => {
+      const pLbl = Living.pressureLabel(s, n.id);
+      return {
+        id: n.id,
+        title: n.name,
+        sub: n.role.replace(/ \(.*\)$/, '') + (n.kenmerk ? ' · ' + KENMERK[n.kenmerk].label : '') +
+          (s.play.cleared[n.id] && Level.get(s).checkLabel ? ' · alibi bevestigd' : '') +
+          (pLbl ? ' · ' + pLbl : '') +
+          (() => { const k = Pins.ends(s, 'p:' + n.id).length; return k ? ' · ' + k + (k === 1 ? ' draadje' : ' draadjes') : ''; })(),
+        warn: !!s.play.cleared[n.id] && Level.get(s).dim
+      };
+    });
+    const evCard = (e, otherId) => {
+      const ri = Evidence.roleInfo(e);
+      return {
+        id: e.id,
+        title: e.title,
+        sub: (easy ? ri.short : (e.item ? Rnd.cap(e.item) : 'Verklaring')) +
+          (e.id === otherId ? ' · al in het andere vak gekozen' : '') +
+          (s.play.debunked[e.id] ? ' · weerlegd' : ''),
+        warn: !!s.play.debunked[e.id]
+      };
+    };
+    const pool = f.filter((e) => e.route !== 'start');
+    const motives = (easy ? pool.filter((e) => e.slot === 'motive') : pool).map((e) => evCard(e, d.methodEvidenceId));
+    const methods = (easy ? pool.filter((e) => e.slot === 'method') : pool).map((e) => evCard(e, d.motiveEvidenceId));
 
     const slotMeta = {
-      suspectId:        { label: '1. Kies de dader (alleen mensen die je hebt gesproken)', items: suspects },
-      motiveEvidenceId: { label: '2. Kies het bewijsstuk voor het motief', items: motives },
-      methodEvidenceId: { label: '3. Kies het bewijsstuk voor de werkwijze of het gebroken alibi', items: methods }
+      suspectId:        { label: '1. Wie — kies de dader (alleen mensen die je hebt gesproken)', items: suspects },
+      motiveEvidenceId: { label: '2. Waarom — kies het spoor dat het motief bewijst' + (easy ? ' (gefilterd op Makkelijk)' : ' (kies zelf uit al je sporen)'), items: motives },
+      methodEvidenceId: { label: '3. Hoe — kies het spoor dat de werkwijze of het gebroken alibi bewijst' + (easy ? ' (gefilterd op Makkelijk)' : ' (kies zelf uit al je sporen)'), items: methods }
     }[curSlot];
 
     const ready = !!(sus && mot && met);
@@ -1602,23 +1659,23 @@ const UI = {
       <div class="zv-sheet">
         <div class="zv-head">
           <span>${U.esc(sr.badge)}</span>
-          <small>${U.esc(s.world.city.name)} · Dag ${s.clock.day}, ${PARTS[Math.min(s.clock.part, 2)]} · ${U.esc(Level.get(s).label)}</small>
+          <small>${U.esc(s.world.city.name)} · Dag ${s.clock.day}, ${U.hm(Clock.norm(s))} · ${U.esc(Level.get(s).label)}</small>
         </div>
         <p class="zv-intro">${U.esc(sr.intro)}</p>
         <div class="zv-madlibs">
-          <p>Uit het onderzoek in <b>${U.esc(s.world.city.name)}</b> blijkt dat het voorval rond <b>${U.esc(s.crime.victim.name)}</b> bij ${U.esc(crimeloc ? crimeloc.name : s.world.city.name)} — dat aanvankelijk doorging voor <i>${U.esc(s.crime.publicVersion)}</i> — het werk is van ${blank('suspectId', sus ? sus.name : null, '[ 1. Kies verdachte ]')}.</p>
-          <p>De drijfveer achter de daad wordt sluitend aangetoond door ${blank('motiveEvidenceId', mot ? mot.title : null, '[ 2. Kies motief-bewijs ]')}, terwijl de werkwijze en aanwezigheid ter plekke vaststaan dankzij ${blank('methodEvidenceId', met ? met.title : null, '[ 3. Kies werkwijze / alibi-bewijs ]')}.</p>
+          <p>Uit het onderzoek in <b>${U.esc(s.world.city.name)}</b> blijkt dat het voorval rond <b>${U.esc(s.crime.victim.name)}</b> bij ${U.esc(crimeloc ? crimeloc.name : s.world.city.name)} — dat aanvankelijk doorging voor <i>${U.esc(s.crime.publicVersion)}</i> — het werk is van ${blank('suspectId', sus ? sus.name : null, '[ 1. Kies wie · dader ]')}.</p>
+          <p>Waarom ${sus ? U.esc(U.first(sus)) : 'de dader'} dit deed (het motief) blijkt uit ${blank('motiveEvidenceId', mot ? mot.title : null, '[ 2. Kies waarom · motief ]')}, en hoe het gebeurde (werkwijze of doorgeprikt alibi) staat vast dankzij ${blank('methodEvidenceId', met ? met.title : null, '[ 3. Kies hoe · werkwijze / alibi ]')}.</p>
         </div>
         <div class="zv-foot">
           <span>Opgemaakt door <b>${U.esc(s.protagonist.name)}</b> (${U.esc(s.protagonist.background)})</span>
-          ${ready && !s.play.ended ? `<button type="button" class="zv-seal" data-f="accuse">Onderteken &amp; Sluit de zaak</button>` : `<span class="sp-note">Vul alle drie de velden in om te ondertekenen</span>`}
+          ${ready && !s.play.ended ? `<button type="button" class="zv-seal" data-f="accuse">Confronteer ${U.esc(U.first(sus))} met dit verslag</button>` : `<span class="sp-note">Vul alle drie de velden in om de confrontatie aan te gaan</span>`}
         </div>
       </div>
       <div class="zv-picker">
         <div class="zv-tabs">
-          <button type="button" class="sp-chip${curSlot === 'suspectId' ? ' on' : ''}" data-zslot="suspectId">1. Verdachte ${sus ? '✓' : ''}</button>
-          <button type="button" class="sp-chip${curSlot === 'motiveEvidenceId' ? ' on' : ''}" data-zslot="motiveEvidenceId">2. Motief ${mot ? '✓' : ''}</button>
-          <button type="button" class="sp-chip${curSlot === 'methodEvidenceId' ? ' on' : ''}" data-zslot="methodEvidenceId">3. Werkwijze ${met ? '✓' : ''}</button>
+          <button type="button" class="sp-chip${curSlot === 'suspectId' ? ' on' : ''}" data-zslot="suspectId">1. Wie ${sus ? '✓' : ''}</button>
+          <button type="button" class="sp-chip${curSlot === 'motiveEvidenceId' ? ' on' : ''}" data-zslot="motiveEvidenceId">2. Waarom ${mot ? '✓' : ''}</button>
+          <button type="button" class="sp-chip${curSlot === 'methodEvidenceId' ? ' on' : ''}" data-zslot="methodEvidenceId">3. Hoe ${met ? '✓' : ''}</button>
         </div>
         <h4>${U.esc(slotMeta.label)}</h4>
         <div class="zv-cards">
@@ -1626,7 +1683,7 @@ const UI = {
             <b>${U.esc(x.title)}</b><small>${U.esc(x.sub)}</small>
           </button>`).join('') || '<p class="sys">Nog geen geschikte personen of sporen gevonden voor dit veld.</p>'}
         </div>
-        <p class="sys" style="margin-top:8px">Let op: een onjuiste aanklacht kost vertrouwen in de stad én de rest van het dagdeel.</p>
+        <p class="sys" style="margin-top:8px">Je legt dit verslag persoonlijk voor aan de verdachte. Klopt één van de schakels niet, dan kost dat vertrouwen in de stad én tijd.</p>
       </div>
     </div>`;
 
@@ -1640,22 +1697,27 @@ const UI = {
         if (s.play.cleared[sus.id] && Level.get(s).checkLabel) warns.push('Het alibi van ' + sus.name + ' staat als bevestigd genoteerd.');
         if (s.play.debunked[mot.id]) warns.push('"' + mot.title + '" is eerder weerlegd.');
         if (s.play.debunked[met.id]) warns.push('"' + met.title + '" is eerder weerlegd.');
-        const body = `<p>Controleer je aanklacht voordat je ondertekent:</p>` +
+        if (mot.id === met.id) warns.push('Je hebt voor Waarom en Hoe hetzelfde spoor gekozen.');
+        const body = `<p>Je staat op het punt om <b>${U.esc(sus.name)}</b> rechtstreeks te confronteren met dit zaakverslag:</p>` +
           `<ul class="confirm-list">` +
-            `<li><span>Verdachte:</span> <b>${U.esc(sus.name)}</b></li>` +
-            `<li><span>Motief-bewijs:</span> <b>${U.esc(mot.title)}</b></li>` +
-            `<li><span>Werkwijze-bewijs:</span> <b>${U.esc(met.title)}</b></li>` +
+            `<li><span>1. Wie (dader):</span> <b>${U.esc(sus.name)}</b></li>` +
+            `<li><span>2. Waarom (motief):</span> <b>${U.esc(mot.title)}</b></li>` +
+            `<li><span>3. Hoe (werkwijze / alibi):</span> <b>${U.esc(met.title)}</b></li>` +
           `</ul>` +
           (warns.length ? `<p class="confirm-warn">${warns.map(U.esc).join(' ')}</p>` : '') +
-          `<p class="sys">Een onjuiste aanklacht kost vertrouwen in de stad én de rest van het dagdeel.</p>`;
+          `<p class="sys">Als alle drie de schakels kloppen, dwing je een bekentenis af. Een zwakke schakel kost vertrouwen en tijd.</p>`;
         return this.confirm({
-          title: 'Aanklacht indienen?',
+          title: 'Confronteer ' + sus.name + '?',
           body: body,
-          okLabel: 'Ja, dien aanklacht in',
+          okLabel: 'Ja, ga de confrontatie aan',
           cancelLabel: 'Terug naar zaakverslag',
           danger: warns.length > 0,
           onCancel: () => this.dossier(),
-          onOk: () => { SFX.seal(); this.run((st) => Act.accuse(st)); }
+          onOk: () => {
+            SFX.seal();
+            this.sel = null; this.link = null; this.stn = null; this.hot = null;
+            this.run((st) => Act.startFinalConfront(st));
+          }
         });
       }
       const field = t.dataset.f, nextVal = d[field] === t.dataset.v ? null : t.dataset.v;

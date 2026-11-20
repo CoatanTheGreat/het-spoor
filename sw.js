@@ -1,10 +1,10 @@
 'use strict';
 /* =====================================================================
-   Het Spoor — Service Worker (v0.18.0, Fase H)
+   Het Spoor — Service Worker (v0.19.0, Fase I)
    100% offline-first precache with explicit cache versioning and
    user-controlled update activation (SKIP_WAITING via update banner).
    ===================================================================== */
-const SW_VERSION = 'v0.18.0';
+const SW_VERSION = 'v0.19.0';
 const CACHE_PREFIX = 'het-spoor-';
 const CACHE_NAME = CACHE_PREFIX + SW_VERSION;
 
